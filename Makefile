@@ -1,4 +1,4 @@
 all:	jacobi.exe
 
-%.exe:	%.cpp
-	nvcc -D_FORCE_INLINES -x cu -I. $< -o $@
+%.exe:	%.cpp UpperTriangular.h
+	nvcc -D_FORCE_INLINES -arch=sm_52 -x cu -I. $< -o $@

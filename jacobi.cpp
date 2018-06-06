@@ -1,5 +1,6 @@
-#include<utility>
 #include<stdio.h>
+
+#include"UpperTriangular.h"
 
 __device__ __host__
 float jacobiGrid(float leftMatrix, float centerMatrix, float rightMatrix,
@@ -154,86 +155,6 @@ void __jacobiBlockLowerTriangleFromShared(
 
 }
 
-__device__ 
-void __jacobiBlockUpperTriangleFromShared(
-		float * xLeftBlock, float *xRightBlock, const float *rhsBlock,
-		const float * leftMatrixBlock, const float * centerMatrixBlock,
-                const float * rightMatrixBlock)
-{
-    extern __shared__ float sharedMemory[];
-    float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x;
-    float * tmp; // helpful to perform swap
-
-    for (int k = 0; k < blockDim.x/2; ++k) {
-        if (k > 0) {
-            if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-                float leftX = x0[threadIdx.x - 1];
-                float centerX = x0[threadIdx.x];
-                float rightX = x0[threadIdx.x + 1];
-                x1[threadIdx.x] = jacobiGrid(
-				leftMatrixBlock[threadIdx.x],
-				centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-		//printf("I am on step %d of UpperTriangle, on thread %d, and the solution is %f\n", k, threadIdx.x, x1[threadIdx.x]);
-            }
-	    // Error: calling a host function from a device function is not allowed
-            // std::swap(x0, x1); 
-	    tmp = x1; 
-            x1 = x0;
-            x0 = tmp;
-            __syncthreads();
-	    //("I am on step %d of UpperTriangle, on thread %d, and the solution is %f\n", k, threadIdx.x, x0[threadIdx.x]);
-        }
-        if (threadIdx.x == k or threadIdx.x == k + 1) {
-            xLeftBlock[k + threadIdx.x] = x0[threadIdx.x];
-        }
-        int reversedIdx = blockDim.x - threadIdx.x - 1;
-        if (reversedIdx == k or reversedIdx == k + 1) {
-            xRightBlock[k + reversedIdx] = x0[threadIdx.x];
-        }
-    }
-}
-
-__global__
-void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
-                             const float * x0Gpu, const float *rhsGpu, 
-                             const float * leftMatrixGpu, const float *centerMatrixGpu,
-                             const float * rightMatrixGpu)
-{
-    int blockShift = blockDim.x * blockIdx.x;
-    float * xLeftBlock = xLeftGpu + blockShift;
-    float * xRightBlock = xRightGpu + blockShift;
-    const float * x0Block = x0Gpu + blockShift;
-    const float * rhsBlock = rhsGpu + blockShift;
-    const float * leftMatrixBlock = leftMatrixGpu + blockShift;
-    const float * centerMatrixBlock = centerMatrixGpu + blockShift;
-    const float * rightMatrixBlock = rightMatrixGpu + blockShift;
-  
-    // printf("I have entered block %d and thread %d\n", blockIdx.x, threadIdx.x);
-
-    // 1 - Allocate shared memory and move x0Gpu to appropriate spot in shared memory
-    extern __shared__ float sharedMemory[];
-    // Ensure entirety of sharedMemory is allocated (size 2 * threadsPerBlock)
-    sharedMemory[threadIdx.x] = x0Block[threadIdx.x];
-    sharedMemory[threadIdx.x + blockDim.x] = x0Block[threadIdx.x];
-    // printf("The value in shared Memory of thread %f is %d\n", threadIdx.x, sharedMemory[threadIdx.x]);
-    __syncthreads();
-
-    // printf("The value in x0Gpu is %f\n", x0Gpu[threadIdx.x]);
-
-    __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-    		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock);
-
-    printf("I am finished with Upper Triangle. In thread %d, the value of xLeft and xRight are %f and %f\n", threadIdx.x, xLeftBlock[threadIdx.x], xRightBlock[threadIdx.x]);
-
-    // printf("The value in x0Gpu is %f\n", x0Gpu[threadIdx.x]);
-	
-    // printf("The value in xLeft in thread %d is %f\n", threadIdx.x, xLeftBlock[threadIdx.x]);
-    
-    // printf("The value in xRight in thread %d is %f\n", threadIdx.x, xRightBlock[threadIdx.x]); 
-
-}
 
 __global__
 void _jacobiGpuLowerTriangle(const float * xLeftGpu, const float *xRightGpu,
@@ -404,7 +325,8 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     
     // Perform up triangle
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock);
+                                         leftMatrixBlock, centerMatrixBlock,
+                                         rightMatrixBlock, jacobiGrid);
 
     printf("After finishing Upper Triangle From Shared, in thread %d my xLeftBlock and xRightBlock values are %f and %f\n", threadIdx.x, xLeftBlock[threadIdx.x], xRightBlock[threadIdx.x]);
 
@@ -423,7 +345,7 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     float * xRightBlock = xLeftGpu + blockShift;
 
     const float * rhsBlock = rhsGpu + blockShift;
-    const float * leftMatrixBlock = leftMatrixGpu;
+    const float * leftMatrixBlock = leftMatrixGpu + blockShift;
     const float * centerMatrixBlock = centerMatrixGpu + blockShift;
     const float * rightMatrixBlock = rightMatrixGpu + blockShift;
     
@@ -439,7 +361,7 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     
     // Perform up triangle
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock);
+                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, jacobiGrid);
 
     printf("After finishing Upper Triangle In GpuDiamond, in thread %d my xLeftBlock and xRightBlock values are %f and %f\n", threadIdx.x, xLeftBlock[threadIdx.x], xRightBlock[threadIdx.x]);
 }
@@ -485,7 +407,7 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
         sizeof(float) * sharedFloatsPerBlock>>>(
                 xLeftGpu, xRightGpu,
                 x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                rightMatrixGpu);
+                rightMatrixGpu, jacobiGrid);
     _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
@@ -582,5 +504,5 @@ int main()
     delete[] rightMatrix;
     delete[] solutionCpu;
     delete[] solutionGpuClassic;
-    // delete[] solutionGpuSwept;
+     delete[] solutionGpuSwept;
 }
