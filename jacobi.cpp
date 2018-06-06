@@ -1,14 +1,14 @@
 #include<stdio.h>
 
-#include"UpperTriangular.h"
-
-__device__ __host__
-float jacobiGrid(float leftMatrix, float centerMatrix, float rightMatrix,
-                 float leftX, float centerX, float rightX, float centerRhs)
+__device__ __forceinline__ __host__
+float gridOp(float leftMatrix, float centerMatrix, float rightMatrix,
+             float leftX, float centerX, float rightX, float centerRhs)
 {
     return (centerRhs - (leftMatrix * leftX + rightMatrix * rightX))
          / centerMatrix;
 }
+
+#include"UpperTriangular.h"
 
 float * jacobiCpu(const float * initX, const float * rhs,
                   const float * leftMatrix, const float * centerMatrix,
@@ -22,7 +22,7 @@ float * jacobiCpu(const float * initX, const float * rhs,
             float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
             float centerX = x0[iGrid];
             float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-            x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+            x1[iGrid] = gridOp(leftMatrix[iGrid], centerMatrix[iGrid],
                                    rightMatrix[iGrid], leftX, centerX, rightX,
                                    rhs[iGrid]);
         }
@@ -43,7 +43,7 @@ void _jacobiGpuClassicIteration(float * x1,
         float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
         float centerX = x0[iGrid];
         float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-        x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+        x1[iGrid] = gridOp(leftMatrix[iGrid], centerMatrix[iGrid],
                                rightMatrix[iGrid], leftX, centerX, rightX,
                                rhs[iGrid]);
     }
@@ -123,7 +123,7 @@ void __jacobiBlockLowerTriangleFromShared(
                 float leftX = x0[threadIdx.x - 1];
                 float centerX = x0[threadIdx.x];
                 float rightX = x0[threadIdx.x + 1];
-                x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
+                x1[threadIdx.x] = gridOp(leftMatrixBlock[threadIdx.x],
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
@@ -326,7 +326,7 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     // Perform up triangle
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                          leftMatrixBlock, centerMatrixBlock,
-                                         rightMatrixBlock, jacobiGrid);
+                                         rightMatrixBlock);
 
     printf("After finishing Upper Triangle From Shared, in thread %d my xLeftBlock and xRightBlock values are %f and %f\n", threadIdx.x, xLeftBlock[threadIdx.x], xRightBlock[threadIdx.x]);
 
@@ -361,7 +361,7 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     
     // Perform up triangle
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, jacobiGrid);
+                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock);
 
     printf("After finishing Upper Triangle In GpuDiamond, in thread %d my xLeftBlock and xRightBlock values are %f and %f\n", threadIdx.x, xLeftBlock[threadIdx.x], xRightBlock[threadIdx.x]);
 }
@@ -407,7 +407,7 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
         sizeof(float) * sharedFloatsPerBlock>>>(
                 xLeftGpu, xRightGpu,
                 x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                rightMatrixGpu, jacobiGrid);
+                rightMatrixGpu);
     _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
