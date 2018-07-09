@@ -127,8 +127,8 @@ void __jacobiBlockUpperTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
 				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
             }
-	    float * tmp = x1; x1 = x0; x0 = tmp;
             __syncthreads();
+	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
         if (threadIdx.x == k or threadIdx.x == k + 1) {
             xLeftBlock[k + threadIdx.x] = x0[threadIdx.x];
@@ -137,6 +137,7 @@ void __jacobiBlockUpperTriangleFromShared(
         if (reversedIdx == k or reversedIdx == k + 1) {
             xRightBlock[k + reversedIdx] = x0[threadIdx.x];
         }
+	__syncthreads();
     }
 }
 
@@ -159,7 +160,6 @@ void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
 
     extern __shared__ float sharedMemory[];
     sharedMemory[threadIdx.x] = x0Block[threadIdx.x];
-    __syncthreads();
 
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
     		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
@@ -195,7 +195,24 @@ void __jacobiBlockLowerTriangleFromShared(
         if (reversedIdx == k-1 or reversedIdx == k-2) {
             x0[threadIdx.x] = xRightBlock[blockDim.x-k-reversedIdx-1];
         }
+	__syncthreads();
     }
+
+    float leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x0[threadIdx.x - 1];
+    float centerX = x0[threadIdx.x];
+    float rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x0[threadIdx.x + 1];
+    if (iGrid == 0) {
+        leftX = 0.0;    
+    }
+    if (iGrid == nGrids-1) {
+        rightX = 0.0;
+    }
+    x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
+                                centerMatrixBlock[threadIdx.x],
+                                rightMatrixBlock[threadIdx.x],
+                                leftX, centerX, rightX, rhsBlock[threadIdx.x]);
+    __syncthreads();
+    float * tmp = x1; x1 = x0; x0 = tmp;
 }
 
 __global__
@@ -232,8 +249,6 @@ void _jacobiGpuShiftedLowerTriangle(float * x0Gpu, float *xLeftGpu,
     
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                          leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
-    
-    __syncthreads();
 
     x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
  
@@ -270,18 +285,15 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
         memcpy(centerMatrixBlock + blockDim.x/2, centerMatrixGpu, sizeof(float)*blockDim.x/2);
         memcpy(rightMatrixBlock + blockDim.x/2, rightMatrixGpu, sizeof(float)*blockDim.x/2);
     }
-
-    __syncthreads();
     
     extern __shared__ float sharedMemory[];
     
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                          leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);  
 
-    __syncthreads(); 
-
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                        leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
+
 }
 
 __global__
@@ -303,12 +315,8 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     
     extern __shared__ float sharedMemory[];
 
-    __syncthreads();
-
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
-
-    __syncthreads();
     
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
@@ -352,12 +360,12 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                    rightMatrixGpu, nGrids); 
+                    rightMatrixGpu, nGrids);
     _jacobiGpuDiamond <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                        rightMatrixGpu, nGrids); 
+                        rightMatrixGpu, nGrids);  
     _jacobiGpuShiftedLowerTriangle <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         x0Gpu, xLeftGpu, xRightGpu,
@@ -393,6 +401,7 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
     cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids,
             cudaMemcpyDeviceToHost);
 
+    cudaFree(x0Gpu);
     cudaFree(xLeftGpu);
     cudaFree(xRightGpu);
     cudaFree(rhsGpu);
@@ -405,13 +414,11 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
 
 int main(int argc, char *argv[])
 {
-    // DEFINE the number of grid points, threads per Block (number of cycles of the swept rule set to 1)
     int nGrids = atoi(argv[1]); 
     const int threadsPerBlock = atoi(argv[2]); 
     int nCycles = 1;
 
-    int nIters = 3*(threadsPerBlock/2-2) * nCycles; 
-
+    int nIters = (3.0/2.0)*threadsPerBlock*nCycles;   
     float * initX = new float[nGrids];
     float * rhs = new float[nGrids];
     float * leftMatrix = new float[nGrids];
@@ -427,48 +434,25 @@ int main(int argc, char *argv[])
         rightMatrix[iGrid] = -1.0f / (dx * dx);
     }
 
-    cudaEvent_t startClassic, stopClassic;
-    cudaEvent_t startSwept, stopSwept;
-    float timeClassic;
-    float timeSwept;
-    cudaEventCreate(&startClassic);
-    cudaEventCreate(&stopClassic);
-    cudaEventCreate(&startSwept);
-    cudaEventCreate(&stopSwept);
-
     float * solutionCpu = jacobiCpu(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters);
-
-    cudaEventRecord(startClassic, 0);
     float * solutionGpuClassic = jacobiGpuClassic(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock);
-    cudaEventRecord(stopClassic, 0);
-    cudaEventSynchronize(stopClassic);
-    cudaEventElapsedTime(&timeClassic, startClassic, stopClassic);
-
-    cudaEventRecord(startSwept, 0);
     float * solutionGpuSwept = jacobiGpuSwept(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, nCycles);
-    cudaEventRecord(stopSwept, 0); 
-    cudaEventSynchronize(stopSwept);
-    cudaEventElapsedTime(&timeSwept, startSwept, stopSwept);
 
     for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
-        printf("%f %f %f\n", solutionCpu[iGrid],
+        printf("%d %f %f %f\n", iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
-        //assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
-	/*if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-5) {
+        // assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
+	/* if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-5) {
 	    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
-	}*/
+	} */
     }
 
     printf("The solution for %d grid points, with %d threads per block, and %d iterations is\n", 
            nGrids, threadsPerBlock, nIters);
- 
-    printf("The time (per time step) required for the Classic Iteration is: %f ms\n", timeClassic/nIters);
-    printf("The time (per time step) required for the Swept Rule is: %f ms\n ", timeSwept/(3*(threadsPerBlock/2-2) * nCycles));
-    printf("The swept rule takes %f times the time that the Classic Iteration takes\n", timeSwept/timeClassic);
 
     delete[] initX;
     delete[] rhs;
