@@ -216,34 +216,21 @@ void __jacobiBlockLowerTriangleFromShared(
 }
 
 __global__
-void _jacobiGpuShiftedLowerTriangle(float * x0Gpu, float *xLeftGpu,
+void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
                              float * xRightGpu, float *rhsGpu, 
                              float * leftMatrixGpu, float *centerMatrixGpu,
                              float * rightMatrixGpu, int nGrids)
 {
     int blockShift = blockDim.x * blockIdx.x;
-    float * xLeftBlock = xRightGpu + blockShift;
-    float * xRightBlock = (blockIdx.x == (gridDim.x-1)) ?
-                          xLeftGpu : 
-                          xLeftGpu + blockShift + blockDim.x;
+    float * xLeftBlock = xLeftGpu + blockShift;
+    float * xRightBlock = xRightGpu + blockShift;
+    float * x0Block = x0Gpu + blockShift;
+    float * rhsBlock = rhsGpu + blockShift;
+    float * leftMatrixBlock = leftMatrixGpu + blockShift;
+    float * centerMatrixBlock = centerMatrixGpu + blockShift;
+    float * rightMatrixBlock = rightMatrixGpu + blockShift;
 
-    int iGrid = blockIdx.x * blockDim.x + threadIdx.x + blockDim.x/2;
-    iGrid = (iGrid < nGrids) ? iGrid : threadIdx.x - blockDim.x/2;
-
-    int indexShift = blockDim.x/2;
-    float * x0Block = x0Gpu + blockShift + indexShift;
-    float * rhsBlock = rhsGpu + blockShift + indexShift;
-    float * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
-    float * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
-    float * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
-        
-    /*if (blockDim.x == gridDim.x - 1) {
-        memcpy(x0Block + blockDim.x/2, x0Gpu, sizeof(float)*blockDim.x/2);
-        memcpy(rhsBlock + blockDim.x/2, rhsGpu, sizeof(float)*blockDim.x/2);
-        memcpy(leftMatrixBlock + blockDim.x/2, leftMatrixGpu, sizeof(float)*blockDim.x/2);
-        memcpy(centerMatrixBlock + blockDim.x/2, centerMatrixGpu, sizeof(float)*blockDim.x/2);
-        memcpy(rightMatrixBlock + blockDim.x/2, rightMatrixGpu, sizeof(float)*blockDim.x/2);
-    }*/
+    int iGrid = blockIdx.x * blockDim.x + threadIdx.x;
     
     extern __shared__ float sharedMemory[];
     
@@ -251,10 +238,7 @@ void _jacobiGpuShiftedLowerTriangle(float * x0Gpu, float *xLeftGpu,
                          leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
 
     x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
- 
-   if (blockIdx.x == gridDim.x - 1) {
-       memcpy(x0Gpu, sharedMemory + blockDim.x/2, sizeof(float)*blockDim.x/2);
-   }
+
 }
 
 __global__       
@@ -371,12 +355,7 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
                     rightMatrixGpu, nGrids);
-    _jacobiGpuDiamond <<<nBlocks, threadsPerBlock,
-                sizeof(float) * sharedFloatsPerBlock>>>(
-                        xLeftGpu, xRightGpu,
-                        rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                        rightMatrixGpu, nGrids);  
-    _jacobiGpuShiftedLowerTriangle <<<nBlocks, threadsPerBlock,
+    _jacobiGpuLowerTriangle <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         x0Gpu, xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
@@ -428,7 +407,7 @@ int main(int argc, char *argv[])
     const int threadsPerBlock = atoi(argv[2]); 
     int nCycles = atoi(argv[3]);
 
-    int nIters = (3.0/2.0)*threadsPerBlock*nCycles;   
+    int nIters = threadsPerBlock*nCycles;   
     float * initX = new float[nGrids];
     float * rhs = new float[nGrids];
     float * leftMatrix = new float[nGrids];
