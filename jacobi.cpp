@@ -127,7 +127,6 @@ void __jacobiBlockUpperTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
 				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
             }
-            __syncthreads();
 	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
         if (threadIdx.x == k or threadIdx.x == k + 1) {
@@ -185,7 +184,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
 	    }
-	    __syncthreads();
  	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
         if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
@@ -211,7 +209,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-    __syncthreads();
     float * tmp = x1; x1 = x0; x0 = tmp;
 }
 
