@@ -127,7 +127,6 @@ void __jacobiBlockUpperTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
 				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
             }
-            __syncthreads();
 	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
         if (threadIdx.x == k or threadIdx.x == k + 1) {
@@ -185,7 +184,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
 	    }
-	    __syncthreads();
  	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
         if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
@@ -211,7 +209,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-    __syncthreads();
     float * tmp = x1; x1 = x0; x0 = tmp;
 }
 
@@ -430,15 +427,15 @@ int main(int argc, char *argv[])
     float * solutionGpuSwept = jacobiGpuSwept(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, nCycles);
 
-    for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
+    /*for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
         printf("%d %f %f %f\n", iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
         // assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
-	/*if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-5) {
+	if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-5) {
 	    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
-	}*/
-    }
+	}
+    }*/
 
     printf("The solution for %d grid points, with %d threads per block, and %d iterations is\n", 
            nGrids, threadsPerBlock, nIters);
