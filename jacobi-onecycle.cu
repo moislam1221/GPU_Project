@@ -118,14 +118,22 @@ void __jacobiBlockUpperTriangleFromShared(
     #pragma unroll
     for (int k = 1; k < blockDim.x/2; ++k) {
         if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-            float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
+            float leftX = x0[threadIdx.x - 1];
             float centerX = x0[threadIdx.x];
-            float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
+            float rightX = x0[threadIdx.x + 1];
+	    if (iGrid == 0) {
+		leftX = 0.0f;
+	    }
+	    if (iGrid == nGrids-1) {
+		rightX = 0.0f;
+	    }
+            float leftMat = leftMatrixBlock[threadIdx.x];
+            float centerMat = centerMatrixBlock[threadIdx.x];
+            float rightMat = rightMatrixBlock[threadIdx.x];
+            float rhs = rhsBlock[threadIdx.x];
             x1[threadIdx.x] = jacobiGrid(
-				leftMatrixBlock[threadIdx.x],
-				centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
+				leftMat, centerMat, rightMat,
+				leftX, centerX, rightX, rhs);
         }
         __syncthreads();	
 	float * tmp = x1; x1 = x0; x0 = tmp;
@@ -210,25 +218,25 @@ void __jacobiBlockLowerTriangleFromShared(
     for (int k = blockDim.x/2; k > 0; --k) {
 	if (k < blockDim.x/2) {
 	    if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-                float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
+                float leftX = x0[threadIdx.x - 1];
                 float centerX = x0[threadIdx.x];
-                float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
-                x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
-                                centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-                                leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-		// printf("Iteration %d: The %d entry of x0 and x1 (handled by thread %d) are %f and %f\n", k, iGrid, threadIdx.x, x0[threadIdx.x], x1[threadIdx.x]);
+                float rightX = x0[threadIdx.x + 1];
+		if (iGrid == 0) {
+		    leftX = 0.0f;
+		}
+		if (iGrid == nGrids-1) {
+		    rightX = 0.0f;
+		}
+		float leftMat = leftMatrixBlock[threadIdx.x];
+		float centerMat = centerMatrixBlock[threadIdx.x];
+ 		float rightMat = rightMatrixBlock[threadIdx.x];
+		float rhs = rhsBlock[threadIdx.x];
+                x1[threadIdx.x] = jacobiGrid(leftMat, centerMat, rightMat, 
+                                leftX, centerX, rightX, rhs);
 	    }
  	    float * tmp = x1; x1 = x0; x0 = tmp;
 	    
         }
-        /* if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
-	    x0[threadIdx.x] = xLeftBlock[blockDim.x-k-threadIdx.x-1];
-        }
-	int reversedIdx = blockDim.x -1 - threadIdx.x;
-        if (reversedIdx == k-1 or reversedIdx == k-2) {
-            x0[threadIdx.x] = xRightBlock[blockDim.x-k-reversedIdx-1];
-        }*/
 	__syncthreads();
     }
 
@@ -246,8 +254,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
     float * tmp = x1; x1 = x0; x0 = tmp;
-
-    // printf("The solution at grid point %d is %f\n", iGrid, x0[threadIdx.x]);
 }
 
 __global__
@@ -297,13 +303,6 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     const float * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
     const float * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
     const float * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
-     
-    /*if (blockIdx.x == gridDim.x-1) {
-        memcpy(rhsBlock + blockDim.x/2, rhsGpu, sizeof(float)*blockDim.x/2);
-        memcpy(leftMatrixBlock + blockDim.x/2, leftMatrixGpu, sizeof(float)*blockDim.x/2);
-        memcpy(centerMatrixBlock + blockDim.x/2, centerMatrixGpu, sizeof(float)*blockDim.x/2);
-        memcpy(rightMatrixBlock + blockDim.x/2, rightMatrixGpu, sizeof(float)*blockDim.x/2);
-    }*/
     
     extern __shared__ float sharedMemory[];
     
