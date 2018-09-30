@@ -115,29 +115,43 @@ void __jacobiBlockUpperTriangleFromShared(
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x; 
 
-    for (int k = 0; k < blockDim.x/2; ++k) {
-        if (k > 0) {
-            if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-                float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
-                float centerX = x0[threadIdx.x];
-                float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
-                x1[threadIdx.x] = jacobiGrid(
+    #pragma unroll
+    for (int k = 1; k < blockDim.x/2; ++k) {
+        if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
+            float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
+            float centerX = x0[threadIdx.x];
+            float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
+            x1[threadIdx.x] = jacobiGrid(
 				leftMatrixBlock[threadIdx.x],
 				centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
 				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-            }
-	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
-        if (threadIdx.x == k or threadIdx.x == k + 1) {
-            xLeftBlock[k + threadIdx.x] = x0[threadIdx.x];
-        }
-        int reversedIdx = blockDim.x - threadIdx.x - 1;
-        if (reversedIdx == k or reversedIdx == k + 1) {
-            xRightBlock[k + reversedIdx] = x0[threadIdx.x];
-        }
-	__syncthreads();
+        __syncthreads();	
+	float * tmp = x1; x1 = x0; x0 = tmp;
     }
+
+    float * tmp = x1; x1 = x0; x0 = tmp;
+
+    int remainder = threadIdx.x % 4;
+
+    if (remainder == 0) {
+	xLeftBlock[threadIdx.x] = x0[threadIdx.x/2];
+	xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x/2)];
+    }
+    else if (remainder == 1) {
+	xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2];
+	xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x+1)/2];
+    }
+    else if (remainder == 2) {
+	xLeftBlock[threadIdx.x] = x1[threadIdx.x/2];
+	xRightBlock[threadIdx.x] = x1[blockDim.x-1-(threadIdx.x/2)];
+    } 
+    else {
+	xLeftBlock[threadIdx.x] = x1[(threadIdx.x+1)/2];
+	xRightBlock[threadIdx.x] = x1[blockDim.x-1-(threadIdx.x+1)/2];
+    }
+
 }
 
 __global__
@@ -173,6 +187,26 @@ void __jacobiBlockLowerTriangleFromShared(
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x;
 
+    int remainder = threadIdx.x % 4;
+
+    if (remainder == 0) {
+	x0[(blockDim.x-threadIdx.x)/2-1] = xLeftBlock[threadIdx.x];
+	x0[(blockDim.x+threadIdx.x)/2] = xRightBlock[threadIdx.x];
+    }
+    else if (remainder == 1) {
+	x0[blockDim.x-1-((blockDim.x+threadIdx.x+1)/2)] = xLeftBlock[threadIdx.x];
+	x0[(blockDim.x+threadIdx.x+1)/2] = xRightBlock[threadIdx.x];
+    }
+    else if (remainder == 2) {
+	x1[(blockDim.x-threadIdx.x)/2-1] = xLeftBlock[threadIdx.x];
+	x1[(blockDim.x+threadIdx.x)/2] = xRightBlock[threadIdx.x];
+    } 
+    else if (remainder == 3 && threadIdx.x != blockDim.x-1) {
+	x1[(blockDim.x-1)-(blockDim.x+threadIdx.x+1)/2] = xLeftBlock[threadIdx.x];
+	x1[(blockDim.x+threadIdx.x+1)/2] = xRightBlock[threadIdx.x];
+    }
+
+    # pragma unroll
     for (int k = blockDim.x/2; k > 0; --k) {
 	if (k < blockDim.x/2) {
 	    if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
@@ -183,16 +217,18 @@ void __jacobiBlockLowerTriangleFromShared(
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
+		// printf("Iteration %d: The %d entry of x0 and x1 (handled by thread %d) are %f and %f\n", k, iGrid, threadIdx.x, x0[threadIdx.x], x1[threadIdx.x]);
 	    }
  	    float * tmp = x1; x1 = x0; x0 = tmp;
+	    
         }
-        if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
+        /* if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
 	    x0[threadIdx.x] = xLeftBlock[blockDim.x-k-threadIdx.x-1];
         }
 	int reversedIdx = blockDim.x -1 - threadIdx.x;
         if (reversedIdx == k-1 or reversedIdx == k-2) {
             x0[threadIdx.x] = xRightBlock[blockDim.x-k-reversedIdx-1];
-        }
+        }*/
 	__syncthreads();
     }
 
@@ -210,22 +246,24 @@ void __jacobiBlockLowerTriangleFromShared(
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
     float * tmp = x1; x1 = x0; x0 = tmp;
+
+    // printf("The solution at grid point %d is %f\n", iGrid, x0[threadIdx.x]);
 }
 
 __global__
-void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
-                             float * xRightGpu, float *rhsGpu, 
-                             float * leftMatrixGpu, float *centerMatrixGpu,
-                             float * rightMatrixGpu, int nGrids)
+void _jacobiGpuLowerTriangle(float * x0Gpu, const float *xLeftGpu,
+                             const float * xRightGpu, const float *rhsGpu, 
+                             const float * leftMatrixGpu, const float *centerMatrixGpu,
+                             const float * rightMatrixGpu, int nGrids)
 {
     int blockShift = blockDim.x * blockIdx.x;
-    float * xLeftBlock = xLeftGpu + blockShift;
-    float * xRightBlock = xRightGpu + blockShift;
+    const float * xLeftBlock = xLeftGpu + blockShift;
+    const float * xRightBlock = xRightGpu + blockShift;
     float * x0Block = x0Gpu + blockShift;
-    float * rhsBlock = rhsGpu + blockShift;
-    float * leftMatrixBlock = leftMatrixGpu + blockShift;
-    float * centerMatrixBlock = centerMatrixGpu + blockShift;
-    float * rightMatrixBlock = rightMatrixGpu + blockShift;
+    const float * rhsBlock = rhsGpu + blockShift;
+    const float * leftMatrixBlock = leftMatrixGpu + blockShift;
+    const float * centerMatrixBlock = centerMatrixGpu + blockShift;
+    const float * rightMatrixBlock = rightMatrixGpu + blockShift;
 
     int iGrid = blockIdx.x * blockDim.x + threadIdx.x;
     
@@ -240,9 +278,9 @@ void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
 
 __global__       
 void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
-                              float * rhsGpu, 
-			      float * leftMatrixGpu, float * centerMatrixGpu,
-                              float * rightMatrixGpu, int nGrids)
+                              const float * rhsGpu, 
+			      const float * leftMatrixGpu, const float * centerMatrixGpu,
+                              const float * rightMatrixGpu, int nGrids)
 {
 
     int blockShift = blockDim.x * blockIdx.x;
@@ -255,10 +293,10 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     iGrid = (iGrid < nGrids) ? iGrid : threadIdx.x - blockDim.x/2;
 
     int indexShift = blockDim.x/2;
-    float * rhsBlock = rhsGpu + blockShift + indexShift;
-    float * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
-    float * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
-    float * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
+    const float * rhsBlock = rhsGpu + blockShift + indexShift;
+    const float * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
+    const float * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
+    const float * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
      
     /*if (blockIdx.x == gridDim.x-1) {
         memcpy(rhsBlock + blockDim.x/2, rhsGpu, sizeof(float)*blockDim.x/2);
@@ -420,6 +458,8 @@ int main(int argc, char *argv[])
         rightMatrix[iGrid] = -1.0f / (dx * dx);
     }
 
+    cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+
     float * solutionCpu = jacobiCpu(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters);
     float * solutionGpuClassic = jacobiGpuClassic(initX, rhs,
@@ -427,7 +467,7 @@ int main(int argc, char *argv[])
     float * solutionGpuSwept = jacobiGpuSwept(initX, rhs,
             leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, nCycles);
 
-    /*for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
+    /* for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
         printf("%d %f %f %f\n", iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
@@ -435,7 +475,7 @@ int main(int argc, char *argv[])
 	if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-5) {
 	    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
 	}
-    }*/
+    } */
 
     printf("The solution for %d grid points, with %d threads per block, and %d iterations is\n", 
            nGrids, threadsPerBlock, nIters);
