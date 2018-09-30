@@ -26,7 +26,7 @@ float * jacobiCpu(const float * initX, const float * rhs,
             float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
             float centerX = x0[iGrid];
             float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-            x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+            x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid], 
                                    rightMatrix[iGrid], leftX, centerX, rightX,
                                    rhs[iGrid]);
         }
