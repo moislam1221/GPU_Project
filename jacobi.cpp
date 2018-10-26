@@ -152,49 +152,6 @@ void __jacobiBlockUpperTriangleFromShared(
     xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
     xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
 
-
-/*    if (remainder == 0) {
-	xLeftBlock[threadIdx.x] = x0[threadIdx.x/2];
-	xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x/2)];
-    }
-    else if (remainder == 1) {
-	xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2];
-	xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x+1)/2];
-    }
-    else if (remainder == 2) {
-	xLeftBlock[threadIdx.x] = x1[threadIdx.x/2];
-	xRightBlock[threadIdx.x] = x1[blockDim.x-1-(threadIdx.x/2)];
-    } 
-    else {
-	xLeftBlock[threadIdx.x] = x1[(threadIdx.x+1)/2];
-	xRightBlock[threadIdx.x] = x1[blockDim.x-1-(threadIdx.x+1)/2];
-    }
-*/
-
-    // Old implementation
-    /* for (int k = 0; k < blockDim.x/2; ++k) {
-        if (k > 0) {
-            if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-                float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
-                float centerX = x0[threadIdx.x];
-                float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
-                x1[threadIdx.x] = jacobiGrid(
-				leftMatrixBlock[threadIdx.x],
-				centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-				leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-            }
-	    float * tmp = x1; x1 = x0; x0 = tmp;
-        }
-        if (threadIdx.x == k or threadIdx.x == k + 1) {
-            xLeftBlock[k + threadIdx.x] = x0[threadIdx.x];
-        }
-        int reversedIdx = blockDim.x - threadIdx.x - 1;
-        if (reversedIdx == k or reversedIdx == k + 1) {
-            xRightBlock[k + reversedIdx] = x0[threadIdx.x];
-        }
-	__syncthreads();
-    } */
 }
 
 __global__
@@ -278,44 +235,6 @@ void __jacobiBlockLowerTriangleFromShared(
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x]);
     float * tmp = x1; x1 = x0; x0 = tmp;
 
-    // Old Implementation
-    /* for (int k = blockDim.x/2; k > 0; --k) {
-	if (k < blockDim.x/2) {
-	    if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
-                float leftX = (iGrid > 0) ? x0[threadIdx.x - 1] : 0.0f;
-                float centerX = x0[threadIdx.x];
-                float rightX = (iGrid < nGrids - 1) ? x0[threadIdx.x + 1] : 0.0f;
-                x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
-                                centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-                                leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-	    }
- 	    float * tmp = x1; x1 = x0; x0 = tmp;
-        }
-        if (threadIdx.x == k-1 or threadIdx.x == k-2) { 
-	    x0[threadIdx.x] = xLeftBlock[blockDim.x-k-threadIdx.x-1];
-        }
-	int reversedIdx = blockDim.x -1 - threadIdx.x;
-        if (reversedIdx == k-1 or reversedIdx == k-2) {
-            x0[threadIdx.x] = xRightBlock[blockDim.x-k-reversedIdx-1];
-        }
-	__syncthreads();
-    }
-
-    float leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x0[threadIdx.x - 1];
-    float centerX = x0[threadIdx.x];
-    float rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x0[threadIdx.x + 1];
-    if (iGrid == 0) {
-        leftX = 0.0;    
-    }
-    if (iGrid == nGrids-1) {
-        rightX = 0.0;
-    }
-    x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
-                                centerMatrixBlock[threadIdx.x],
-                                rightMatrixBlock[threadIdx.x],
-                                leftX, centerX, rightX, rhsBlock[threadIdx.x]);
-    float * tmp = x1; x1 = x0; x0 = tmp; */
 }
 
 __global__
