@@ -151,7 +151,6 @@ void __jacobiBlockUpperTriangleFromShared(
     int remainder = threadIdx.x % 4;
     xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
     xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
-
 }
 
 __global__
@@ -261,40 +260,6 @@ void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
 
     x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
 
-}
-
-__global__
-void _jacobiGpuShiftedLowerTriangle(float * x0Gpu, float *xLeftGpu,
-                             float * xRightGpu, float *rhsGpu, 
-                             float * leftMatrixGpu, float *centerMatrixGpu,
-                             float * rightMatrixGpu, int nGrids)
-{
-    int blockShift = blockDim.x * blockIdx.x;
-    float * xLeftBlock = xRightGpu + blockShift;
-    float * xRightBlock = (blockIdx.x == (gridDim.x-1)) ?
-                          xLeftGpu : 
-                          xLeftGpu + blockShift + blockDim.x;
-
-    int iGrid = blockIdx.x * blockDim.x + threadIdx.x + blockDim.x/2;
-    iGrid = (iGrid < nGrids) ? iGrid : threadIdx.x - blockDim.x/2;
-
-    int indexShift = blockDim.x/2;
-    float * x0Block = x0Gpu + blockShift + indexShift;
-    float * rhsBlock = rhsGpu + blockShift + indexShift;
-    float * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
-    float * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
-    float * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
-    
-    extern __shared__ float sharedMemory[];
-    
-    __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid);
-
-    x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
- 
-    if (blockIdx.x == gridDim.x - 1) {
-        memcpy(x0Gpu, sharedMemory + blockDim.x/2, sizeof(float)*blockDim.x/2);
-    }
 }
 
 __global__       
@@ -509,8 +474,8 @@ int main(int argc, char *argv[])
                              solutionGpuSwept[iGrid]); 
     } 
     */
-
-    /*
+    
+    /*  
     printf("The time needed for the CPU is %f ms\n", cpuTimePerIteration);
     printf("The time needed per Classic Iteration is %f ms\n", classicTimePerIteration);
     printf("The time needed per Swept Iteration is %f ms\n", sweptTimePerIteration);
