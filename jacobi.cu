@@ -48,6 +48,7 @@ float SORGrid(const float leftMatrix, const float centerMatrix, const float righ
 {  
     // Similar to red-black gauss-seidel, but take weighted average of rbgs 
     // value and current centerX value based on relaxation parameter
+    // printf("Relaxation is %f\n", relaxation);
     if (gridPoint % 2 == 1)
     {
     	return relaxation*((centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix) + (1.0-relaxation)*centerX;
@@ -133,9 +134,9 @@ float * jacobiCpu(const float * initX, const float * rhs,
                                    rhs[iGrid], iGrid+1);
 	    }	
 	    else {	
-                x1[iGrid] = SORGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+                x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
                                    rightMatrix[iGrid], leftX, centerX, rightX,
-                                   rhs[iGrid], iGrid, relaxation);
+                                   rhs[iGrid], iGrid);
 		leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
                 centerX = x1[iGrid];
                 rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
@@ -180,16 +181,16 @@ void _jacobiGpuClassicIteration(float * x1,
                                rhs[iGrid], iGrid+1);
 	}
 	else {
-	    x1[iGrid] = SORGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+	    x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
                                rightMatrix[iGrid], leftX, centerX, rightX,
-                               rhs[iGrid], iGrid, relaxation);
+                               rhs[iGrid], iGrid);
 	    leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
 	    centerX = x1[iGrid];
             rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
             x1[iGrid] = SORGrid(leftMatrix[iGrid], centerMatrix[iGrid],
                                rightMatrix[iGrid], leftX, centerX, rightX,
                                rhs[iGrid], iGrid+1, relaxation);
-        }    
+        }   
     }
     __syncthreads();
 }
@@ -256,9 +257,6 @@ void __jacobiBlockUpperTriangleFromShared(
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x; 
 
-    printf("ENTERING UPPER TRIANGLE, x0 value at thread %d is %f\n", iGrid, x0[threadIdx.x]);
-    printf("ENTERING UPPER TRIANGLE, x1 value at thread %d is %f\n", iGrid, x1[threadIdx.x]);
-
     #pragma unroll
     for (int k = 1; k < blockDim.x/2; ++k) {
         if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
@@ -278,11 +276,9 @@ void __jacobiBlockUpperTriangleFromShared(
 	    // Select which kernel to use
             if (method == 0) {
 	        x1[threadIdx.x] = jacobiGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs);
-		printf("after iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
 	    }
 	    else if (method == 1) {
 	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid); 
-	        printf("upper half iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
 	        __syncthreads();	
                 leftX = x1[threadIdx.x - 1];
                 centerX = x1[threadIdx.x];
@@ -293,13 +289,21 @@ void __jacobiBlockUpperTriangleFromShared(
 	        if (iGrid == nGrids-1) {
 		    rightX = 0.0f;
 	        }
-		printf("iGrid: %d, leftX: %f, centerX: %f, rightX: %f\n", iGrid, leftX, centerX, rightX); 
 	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1); 
-	        printf("upper full iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
 	    }
 
 	    else {
-		x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid, relaxation); 
+		x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid); 
+	        __syncthreads();	
+                leftX = x1[threadIdx.x - 1];
+                centerX = x1[threadIdx.x];
+                rightX = x1[threadIdx.x + 1];
+		if (iGrid == 0) {
+	 	    leftX = 0.0f;
+	        }
+	        if (iGrid == nGrids-1) {
+		    rightX = 0.0f;
+	        }
 	        x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1, relaxation); 
             }
         }
@@ -308,9 +312,6 @@ void __jacobiBlockUpperTriangleFromShared(
     } 
     
     float * tmp = x1; x1 = x0; x0 = tmp;
-
-    printf("END OF UPPER TRIANGLE, x0 value at iGrid %d is %f\n", iGrid, x0[iGrid]);
-    printf("END OF UPPER TRIANGLE, x1 value at iGrid %d is %f\n", iGrid, x1[iGrid]);
 
     int remainder = threadIdx.x % 4;
     xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
@@ -359,11 +360,6 @@ void __jacobiBlockLowerTriangleFromShared(
 	x0[(blockDim.x+threadIdx.x+1)/2 + blockDim.x*(remainder>1)] = xRightBlock[threadIdx.x];
     } 
 
-    printf("ENTERING LOWER TRIANGLE, x0 value at thread %d is %f\n", iGrid, x0[threadIdx.x]);
-    printf("ENTERING LOWER TRIANGLE, x1 value at thread %d is %f\n", iGrid, x1[threadIdx.x]);
-
-    //printf("Thread %d: In x0 I have: %f\n", threadIdx.x, x0[iGrid]);
-    //printf("Thread %d: In x0 I have: %f\n", threadIdx.x+blockDim.x, x0[iGrid+blockDim.x]);
     # pragma unroll
     for (int k = blockDim.x/2; k > 0; --k) {
 	if (k < blockDim.x/2) {
@@ -386,11 +382,9 @@ void __jacobiBlockLowerTriangleFromShared(
 	    // Select which kernel to use
             if (method == 0) {
 	        x1[threadIdx.x] = jacobiGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs);
-		printf("after iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
 	    }
 	    else if (method == 1) {
 	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid); 
-		printf("lower half iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
 		__syncthreads();
 		leftX = x1[threadIdx.x - 1];
                 centerX = x1[threadIdx.x];
@@ -402,10 +396,19 @@ void __jacobiBlockLowerTriangleFromShared(
 		    rightX = 0.0f;
 		}
 	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1); 
-		printf("lower full iteration %d, iGrid %d, x1 value %f\n", k-1, iGrid, x1[threadIdx.x]);
             }
 	    else {
-		x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid, relaxation); 
+		x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid); 
+		__syncthreads();
+		leftX = x1[threadIdx.x - 1];
+                centerX = x1[threadIdx.x];
+                rightX = x1[threadIdx.x + 1];
+		if (iGrid == 0) {
+		    leftX = 0.0f;
+		}
+		if (iGrid == nGrids-1) {
+		    rightX = 0.0f;
+		}
 	        x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1, relaxation); 
             }
 	    }
@@ -413,9 +416,6 @@ void __jacobiBlockLowerTriangleFromShared(
         }
 	__syncthreads();
     }
-
-    printf("ALMOST END OF LOWER TRIANGLE, x0 value at thread %d is %f\n", iGrid, x0[threadIdx.x]);
-    printf("ALMOST END OF LOWER TRIANGLE, x1 value at thread %d is %f\n", iGrid, x1[threadIdx.x]);
 
     float leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x0[threadIdx.x - 1];
     float centerX = x0[threadIdx.x];
@@ -437,12 +437,11 @@ void __jacobiBlockLowerTriangleFromShared(
     }
     else if (method == 1) {
 	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid); 
-	printf("lower red iteration end, iGrid %d, x1 value %f\n",  iGrid, x1[threadIdx.x]);
 	__syncthreads();
-        //leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
+        leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
         centerX = x1[threadIdx.x];
         rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
-	leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1]; // - HERE IS THE NEW leftX for GS - check it!!!
+	// leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1]; // - HERE IS THE NEW leftX for GS - check it!!!
         //centerX = x1[threadIdx.x];
         //rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];
 	if (iGrid == 0) {
@@ -451,18 +450,27 @@ void __jacobiBlockLowerTriangleFromShared(
 	if (iGrid == nGrids-1) {
 	    rightX = 0.0f;
 	}
-        printf("end: iGrid %d, thread id %d, leftX %f, rightX %f\n", iGrid, threadIdx.x, leftX, rightX);
-	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid+1); 
-	printf("lower iteration end, iGrid %d, x1 value %f\n", iGrid, x1[threadIdx.x]);
+	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid+1);
         }
-    else {
-	x1[threadIdx.x] = SORGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid, relaxation); 
+        else {
+	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid); 
+	__syncthreads();
+        leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
+        centerX = x1[threadIdx.x];
+        rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
+	//leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1]; // - HERE IS THE NEW leftX for GS - check it!!!
+        //centerX = x1[threadIdx.x];
+        //rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];
+	if (iGrid == 0) {
+	    leftX = 0.0f;
+	}
+	if (iGrid == nGrids-1) {
+	    rightX = 0.0f;
+	}
 	x1[threadIdx.x] = SORGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid+1, relaxation); 
     }
        float * tmp = x1; x1 = x0; x0 = tmp; 
 
-    printf("END OF LOWER TRIANGLE, x0 value at thread %d is %f\n", iGrid, x0[threadIdx.x]);
-    printf("END OF LOWER TRIANGLE, x1 value at thread %d is %f\n", iGrid, x1[threadIdx.x]);
 }
 
 __global__
@@ -638,7 +646,7 @@ int main(int argc, char *argv[])
     const int threadsPerBlock = atoi(argv[2]); 
     const int nIters = atoi(argv[3]);
     const int method = atoi(argv[4]); // 0 for Jacobi, 1 for GS, 2 for SOR
-    float relaxation = 1.0; // if SOR is used, this corresponds to G-S
+    float relaxation; // if SOR is used, this corresponds to G-S
 
     // Check that the methods provided are valid. If not, throw error.
     if (argc < 4) 
@@ -652,7 +660,8 @@ int main(int argc, char *argv[])
         // std::cout << "Since you selected 2 (SOR), you need a fifth argument specifying the relaxation parameter\n" << std:endl;
     }
     else if (method == 2) {	
-        relaxation = atoi(argv[5]);
+        relaxation = atof(argv[5]);
+	printf("Relaxation is %f\n", relaxation);
     }
     
     // Declare arrays and population with values for Poisson equation
@@ -714,9 +723,9 @@ int main(int argc, char *argv[])
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
 	//assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
-	if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-2) {
+	/*if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-2) {
 	    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
-	}
+	}*/
     } 
 
     // Print out time for cpu, classic gpu, and swept gpu approaches
