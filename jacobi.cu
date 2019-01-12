@@ -15,6 +15,52 @@
 #include <string.h>
 #include <utility>
 
+enum method_type { JACOBI, GS, SOR };
+
+template <typename method_type>
+__host__ __device__
+float gridOperation(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
+{
+    float gridValue = centerX;
+    switch(method)
+    {
+        case JACOBI:
+	    return  gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+	case GS:
+	    if (gridPoint % 2 == 1) {
+	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+	    }
+	case SOR:
+	    if (gridPoint % 2 == 1) {
+	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+	    }
+    }
+    return gridValue;
+}
+
+
+template <typename method_type>
+__host__ __device__
+float gridOperation2(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
+{
+    float gridValue = centerX;
+    switch(method)
+    {
+        case JACOBI:
+	    return gridValue;
+	case GS:
+	    if (gridPoint % 2 == 0) {
+	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+	    }
+	case SOR:
+	    float relaxation = 1.0;
+	    if (gridPoint % 2 == 0) {
+	        return gridValue = relaxation*((centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix) + (1.0-relaxation)*centerX;
+	    }
+    }
+    return gridValue;
+}
+
 __device__ __host__
 float jacobiGrid(const float leftMatrix, const float centerMatrix, const float rightMatrix,
                  const float leftX, float centerX, const float rightX, const float centerRhs)
@@ -44,11 +90,12 @@ float RBGSGrid(const float leftMatrix, const float centerMatrix, const float rig
 __device__ __host__
 float SORGrid(const float leftMatrix, const float centerMatrix, const float rightMatrix,
 		      const float leftX, float centerX, const float rightX, const float centerRhs,
-		      const int gridPoint, float relaxation)
+		      const int gridPoint)
 {  
     // Similar to red-black gauss-seidel, but take weighted average of rbgs 
     // value and current centerX value based on relaxation parameter
     // printf("Relaxation is %f\n", relaxation);
+    float relaxation = 1.0;
     if (gridPoint % 2 == 1)
     {
     	return relaxation*((centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix) + (1.0-relaxation)*centerX;
@@ -107,43 +154,24 @@ float solutionError(float * solution, float * exactSolution, int nGrids)
 
 float * jacobiCpu(const float * initX, const float * rhs,
                   const float * leftMatrix, const float * centerMatrix,
-                  const float * rightMatrix, int nGrids, int nIters, int method, float relaxation)
+                  const float * rightMatrix, int nGrids, int nIters, int method)
 {
     float * x0 = new float[nGrids];
     float * x1 = new float[nGrids];
     memcpy(x0, initX, sizeof(float) * nGrids);
+    memcpy(x1, initX, sizeof(float)*nGrids);
     for (int iIter = 0; iIter < nIters; ++ iIter) {
         for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
             float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
             float centerX = x0[iGrid];
             float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-	    if (method == 0) {
-                x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                                       rightMatrix[iGrid], leftX, centerX, rightX,
-                                       rhs[iGrid]);
-	    }
-	    else if (method == 1) {
-                x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                                   rightMatrix[iGrid], leftX, centerX, rightX,
-                                   rhs[iGrid], iGrid);
-		leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-                centerX = x1[iGrid];
-                rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-	        x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                                   rightMatrix[iGrid], leftX, centerX, rightX,
-                                   rhs[iGrid], iGrid+1);
-	    }	
-	    else {	
-                x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                                   rightMatrix[iGrid], leftX, centerX, rightX,
-                                   rhs[iGrid], iGrid);
-		leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-                centerX = x1[iGrid];
-                rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-	        x1[iGrid] = SORGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                                   rightMatrix[iGrid], leftX, centerX, rightX,
-                                   rhs[iGrid], iGrid+1, relaxation);
-	    }
+            x1[iGrid] = gridOperation(leftMatrix[iGrid], centerMatrix[iGrid],
+                                    rightMatrix[iGrid], leftX, centerX, rightX,
+                                    rhs[iGrid], iGrid, method);
+      	    leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
+	    centerX = x1[iGrid];
+	    rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
+	    x1[iGrid] = gridOperation2(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid], iGrid, method);
         }
         float * tmp = x0; x0 = x1; x1 = tmp;
     }
@@ -156,41 +184,20 @@ __global__
 void _jacobiGpuClassicIteration(float * x1,
                          const float * x0, const float * rhs,
                          const float * leftMatrix, const float * centerMatrix,
-                         const float * rightMatrix, int nGrids, int iteration, int method, float relaxation)
+                         const float * rightMatrix, int nGrids, int iteration, int method)
 {
     int iGrid = blockIdx.x * blockDim.x + threadIdx.x;
     if (iGrid < nGrids) {
         float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
         float centerX = x0[iGrid];
         float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-	if (method == 0) {
-             x1[iGrid] = jacobiGrid(leftMatrix[iGrid], centerMatrix[iGrid],
+        x1[iGrid] = gridOperation(leftMatrix[iGrid], centerMatrix[iGrid],
                                     rightMatrix[iGrid], leftX, centerX, rightX,
-                                    rhs[iGrid]);
-	}
-	else if (method == 1) {
-	    x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                               rightMatrix[iGrid], leftX, centerX, rightX,
-                               rhs[iGrid], iGrid);
-            __syncthreads();
-	    leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-	    centerX = x1[iGrid];
-            rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-            x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                               rightMatrix[iGrid], leftX, centerX, rightX,
-                               rhs[iGrid], iGrid+1);
-	}
-	else {
-	    x1[iGrid] = RBGSGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                               rightMatrix[iGrid], leftX, centerX, rightX,
-                               rhs[iGrid], iGrid);
-	    leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-	    centerX = x1[iGrid];
-            rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-            x1[iGrid] = SORGrid(leftMatrix[iGrid], centerMatrix[iGrid],
-                               rightMatrix[iGrid], leftX, centerX, rightX,
-                               rhs[iGrid], iGrid+1, relaxation);
-        }   
+                                    rhs[iGrid], iGrid, method);
+	leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
+	centerX = x1[iGrid];
+	rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
+	x1[iGrid] = gridOperation2(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid], iGrid, method);
     }
     __syncthreads();
 }
@@ -198,7 +205,7 @@ void _jacobiGpuClassicIteration(float * x1,
 float * jacobiGpuClassic(const float * initX, const float * rhs,
                          const float * leftMatrix, const float * centerMatrix,
                          const float * rightMatrix, int nGrids, int nIters,
-                         const int threadsPerBlock, int method, float relaxation)
+                         const int threadsPerBlock, int method)
 {
     // Allocate memory in the CPU for all inputs and solutions
     float * x0Gpu, * x1Gpu;
@@ -227,7 +234,7 @@ float * jacobiGpuClassic(const float * initX, const float * rhs,
 	// Jacobi iteration on the CPU
         _jacobiGpuClassicIteration<<<nBlocks, threadsPerBlock>>>(
                 x1Gpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                rightMatrixGpu, nGrids, iIter, method, relaxation); 
+                rightMatrixGpu, nGrids, iIter, method); 
         float * tmp = x1Gpu; x0Gpu = x1Gpu; x1Gpu = tmp;
     }
 
@@ -252,7 +259,7 @@ __device__
 void __jacobiBlockUpperTriangleFromShared(
 		float * xLeftBlock, float *xRightBlock, const float *rhsBlock,
 		const float * leftMatrixBlock, const float * centerMatrixBlock,
-                const float * rightMatrixBlock, int nGrids, int iGrid, int method, float relaxation)
+                const float * rightMatrixBlock, int nGrids, int iGrid, int method)
 {
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x; 
@@ -274,38 +281,17 @@ void __jacobiBlockUpperTriangleFromShared(
             float rightMat = rightMatrixBlock[threadIdx.x];
             float rhs = rhsBlock[threadIdx.x];
 	    // Select which kernel to use
-            if (method == 0) {
-	        x1[threadIdx.x] = jacobiGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs);
+	    x1[threadIdx.x] = gridOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
+            leftX = x1[threadIdx.x - 1];
+            centerX = x1[threadIdx.x];
+            rightX = x1[threadIdx.x + 1];
+	    if (iGrid == 0) {
+		leftX = 0.0f;
 	    }
-	    else if (method == 1) {
-	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid); 
-	        __syncthreads();	
-                leftX = x1[threadIdx.x - 1];
-                centerX = x1[threadIdx.x];
-                rightX = x1[threadIdx.x + 1];
-		if (iGrid == 0) {
-	 	    leftX = 0.0f;
-	        }
-	        if (iGrid == nGrids-1) {
-		    rightX = 0.0f;
-	        }
-	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1); 
+	    if (iGrid == nGrids-1) {
+		rightX = 0.0f;
 	    }
-
-	    else {
-		x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid); 
-	        __syncthreads();	
-                leftX = x1[threadIdx.x - 1];
-                centerX = x1[threadIdx.x];
-                rightX = x1[threadIdx.x + 1];
-		if (iGrid == 0) {
-	 	    leftX = 0.0f;
-	        }
-	        if (iGrid == nGrids-1) {
-		    rightX = 0.0f;
-	        }
-	        x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1, relaxation); 
-            }
+	    x1[threadIdx.x] = gridOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
         }
         __syncthreads();	
 	float * tmp = x1; x1 = x0; x0 = tmp;
@@ -323,7 +309,7 @@ __global__
 void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
                              const float * x0Gpu, const float *rhsGpu, 
                              const float * leftMatrixGpu, const float *centerMatrixGpu,
-                             const float * rightMatrixGpu, int nGrids, int method, float relaxation)
+                             const float * rightMatrixGpu, int nGrids, int method)
 {
     int blockShift = blockDim.x * blockIdx.x;
     float * xLeftBlock = xLeftGpu + blockShift;
@@ -341,14 +327,14 @@ void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
     sharedMemory[threadIdx.x + blockDim.x] = x0Block[threadIdx.x];
 
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-    		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);
+    		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
 
 __device__ 
 void __jacobiBlockLowerTriangleFromShared(
 		const float * xLeftBlock, const float *xRightBlock, const float *rhsBlock,
 		const float * leftMatrixBlock, const float * centerMatrixBlock,
-                const float * rightMatrixBlock, int nGrids, int iGrid, int method, float relaxation)
+                const float * rightMatrixBlock, int nGrids, int iGrid, int method)
 {
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x;
@@ -376,41 +362,18 @@ void __jacobiBlockLowerTriangleFromShared(
 		float leftMat = leftMatrixBlock[threadIdx.x];
 		float centerMat = centerMatrixBlock[threadIdx.x];
  		float rightMat = rightMatrixBlock[threadIdx.x];
-		float rhs = rhsBlock[threadIdx.x];
-	    
-	    
-	    // Select which kernel to use
-            if (method == 0) {
-	        x1[threadIdx.x] = jacobiGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs);
-	    }
-	    else if (method == 1) {
-	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid); 
-		__syncthreads();
+		float rhs = rhsBlock[threadIdx.x]; 
+	        x1[threadIdx.x] = gridOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 		leftX = x1[threadIdx.x - 1];
-                centerX = x1[threadIdx.x];
-                rightX = x1[threadIdx.x + 1];
+		centerX = x1[threadIdx.x];
+		rightX = x1[threadIdx.x + 1];
 		if (iGrid == 0) {
 		    leftX = 0.0f;
 		}
 		if (iGrid == nGrids-1) {
 		    rightX = 0.0f;
 		}
-	        x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1); 
-            }
-	    else {
-		x1[threadIdx.x] = RBGSGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid); 
-		__syncthreads();
-		leftX = x1[threadIdx.x - 1];
-                centerX = x1[threadIdx.x];
-                rightX = x1[threadIdx.x + 1];
-		if (iGrid == 0) {
-		    leftX = 0.0f;
-		}
-		if (iGrid == nGrids-1) {
-		    rightX = 0.0f;
-		}
-	        x1[threadIdx.x] = SORGrid(leftMat, centerMat, rightMat,leftX, centerX, rightX, rhs, iGrid+1, relaxation); 
-            }
+		x1[threadIdx.x] = gridOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 	    }
  	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
@@ -429,47 +392,21 @@ void __jacobiBlockLowerTriangleFromShared(
     if (iGrid == nGrids-1) {
         rightX = 0.0;
     }
-    if (method == 0) {
-        x1[threadIdx.x] = jacobiGrid(leftMatrixBlock[threadIdx.x],
+    x1[threadIdx.x] = gridOperation(leftMatrixBlock[threadIdx.x],
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
-                                leftX, centerX, rightX, rhsBlock[threadIdx.x]);
+                                leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid, method);
+    leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
+    centerX = x1[threadIdx.x];
+    rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
+    if (iGrid == 0) {
+        leftX = 0.0f;
     }
-    else if (method == 1) {
-	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid); 
-	__syncthreads();
-        leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
-        centerX = x1[threadIdx.x];
-        rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
-	// leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1]; // - HERE IS THE NEW leftX for GS - check it!!!
-        //centerX = x1[threadIdx.x];
-        //rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];
-	if (iGrid == 0) {
-	    leftX = 0.0f;
-	}
-	if (iGrid == nGrids-1) {
-	    rightX = 0.0f;
-	}
-	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid+1);
-        }
-        else {
-	x1[threadIdx.x] = RBGSGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid); 
-	__syncthreads();
-        leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
-        centerX = x1[threadIdx.x];
-        rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
-	//leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1]; // - HERE IS THE NEW leftX for GS - check it!!!
-        //centerX = x1[threadIdx.x];
-        //rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];
-	if (iGrid == 0) {
-	    leftX = 0.0f;
-	}
-	if (iGrid == nGrids-1) {
-	    rightX = 0.0f;
-	}
-	x1[threadIdx.x] = SORGrid(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid+1, relaxation); 
+    if (iGrid == nGrids - 1) {
+	rightX = 0.0f;
     }
-       float * tmp = x1; x1 = x0; x0 = tmp; 
+    x1[threadIdx.x] = gridOperation2(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid, method);
+    float * tmp = x1; x1 = x0; x0 = tmp; 
 
 }
 
@@ -477,7 +414,7 @@ __global__
 void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
                              float * xRightGpu, float *rhsGpu, 
                              float * leftMatrixGpu, float *centerMatrixGpu,
-                             float * rightMatrixGpu, int nGrids, int method, float relaxation)
+                             float * rightMatrixGpu, int nGrids, int method)
 {
     int blockShift = blockDim.x * blockIdx.x;
     float * xLeftBlock = xLeftGpu + blockShift;
@@ -493,7 +430,7 @@ void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
     extern __shared__ float sharedMemory[];
     
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);
+                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 
     x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
 
@@ -503,7 +440,7 @@ __global__
 void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
                               float * rhsGpu, 
 			      float * leftMatrixGpu, float * centerMatrixGpu,
-                              float * rightMatrixGpu, int nGrids, int method, float relaxation)
+                              float * rightMatrixGpu, int nGrids, int method)
 {
 
     int blockShift = blockDim.x * blockIdx.x;
@@ -524,10 +461,10 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     extern __shared__ float sharedMemory[];
     
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);  
+                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);  
 
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);
+                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 
 }
 
@@ -535,7 +472,7 @@ __global__
 void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
                        const float * rhsGpu,
 		       const float * leftMatrixGpu, const float * centerMatrixGpu,
-                       const float * rightMatrixGpu, int nGrids, int method, float relaxation)
+                       const float * rightMatrixGpu, int nGrids, int method)
 {
     int blockShift = blockDim.x * blockIdx.x;
     float * xLeftBlock = xLeftGpu + blockShift;
@@ -551,12 +488,12 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     extern __shared__ float sharedMemory[];
 
     __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                        leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);
+                        leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
     
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
-                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method, relaxation);
+                                      leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
-float * jacobiGpuSwept(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, int nGrids, int nIters, const int threadsPerBlock, const int method, const float relaxation) { 
+float * jacobiGpuSwept(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, int nGrids, int nIters, const int threadsPerBlock, const int method) { 
     
     // Determine number of threads and blocks 
     const int nBlocks = (int)ceil(nGrids / (float)threadsPerBlock);
@@ -598,31 +535,31 @@ float * jacobiGpuSwept(const float * initX, const float * rhs, const float * lef
         sizeof(float) * sharedFloatsPerBlock>>>(
                 xLeftGpu, xRightGpu,
                 x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                rightMatrixGpu, nGrids, method, relaxation);
+                rightMatrixGpu, nGrids, method);
     _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                    rightMatrixGpu, nGrids, method, relaxation);
+                    rightMatrixGpu, nGrids, method);
 
     for (int i = 0; i < nIters/threadsPerBlock-1; i++) {
     _jacobiGpuDiamond <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                        rightMatrixGpu, nGrids, method, relaxation); 
+                        rightMatrixGpu, nGrids, method); 
     _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                    rightMatrixGpu, nGrids, method, relaxation); 
+                    rightMatrixGpu, nGrids, method); 
     }
 
     _jacobiGpuLowerTriangle <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         x0Gpu, xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                        rightMatrixGpu, nGrids, method, relaxation);
+                        rightMatrixGpu, nGrids, method);
 
     float * solution = new float[nGrids];
     cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids,
@@ -645,25 +582,9 @@ int main(int argc, char *argv[])
     const int nGrids = atoi(argv[1]); 
     const int threadsPerBlock = atoi(argv[2]); 
     const int nIters = atoi(argv[3]);
-    const int method = atoi(argv[4]); // 0 for Jacobi, 1 for GS, 2 for SOR
-    float relaxation; // if SOR is used, this corresponds to G-S
 
-    // Check that the methods provided are valid. If not, throw error.
-    if (argc < 4) 
-    {    
-        std::cout << "Please specify at least 4 inputs: nGrid ThreadsPerBlock nIters Method\n" << std::endl;
-	std::cout << "Method should be an int corresponding to one of the methods: Jacobi(0), GS(1), SOR(2)\n" << std::endl;
-    }
+    method_type method = JACOBI;
 
-    // Check that if SOR is selected, that a relaxation parameter is specified
-    if (method == 2 && (argc == 4)) {
-        // std::cout << "Since you selected 2 (SOR), you need a fifth argument specifying the relaxation parameter\n" << std:endl;
-    }
-    else if (method == 2) {	
-        relaxation = atof(argv[5]);
-	printf("Relaxation is %f\n", relaxation);
-    }
-    
     // Declare arrays and population with values for Poisson equation
     float * initX = new float[nGrids];
     float * rhs = new float[nGrids];
@@ -683,7 +604,7 @@ int main(int argc, char *argv[])
 
     // Run the CPU Implementation and measure the time required
     clock_t cpuStartTime = clock();
-    float * solutionCpu = jacobiCpu(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, method, relaxation);
+    float * solutionCpu = jacobiCpu(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, method);
     clock_t cpuEndTime = clock();
     double cpuTime = (cpuEndTime - cpuStartTime) / (double) CLOCKS_PER_SEC;
 
@@ -693,7 +614,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &startClassic );
     cudaEventCreate( &stopClassic );
     cudaEventRecord(startClassic, 0);
-    float * solutionGpuClassic = jacobiGpuClassic(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method, relaxation);
+    float * solutionGpuClassic = jacobiGpuClassic(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopClassic, 0);
     cudaEventSynchronize(stopClassic);
     cudaEventElapsedTime(&timeClassic, startClassic, stopClassic);
@@ -704,7 +625,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &startSwept );
     cudaEventCreate( &stopSwept );
     cudaEventRecord( startSwept, 0);
-    float * solutionGpuSwept = jacobiGpuSwept(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method, relaxation);
+    float * solutionGpuSwept = jacobiGpuSwept(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopSwept, 0);
     cudaEventSynchronize(stopSwept);
     cudaEventElapsedTime(&timeSwept, startSwept, stopSwept);
@@ -719,7 +640,7 @@ int main(int argc, char *argv[])
 
     // Print out results to the screen, notify if any GPU Classic or Swept values differ significantly
     for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
-        printf("%d %f %f \n",iGrid, //solutionCpu[iGrid],
+        printf("%d %f %f %f \n",iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
 	//assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
