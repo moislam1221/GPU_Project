@@ -25,7 +25,7 @@ float gridOperation(const float leftMatrix, const float centerMatrix, const floa
     switch(method)
     {
         case JACOBI:
-	    return  gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+	    return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
 	case GS:
 	    if (gridPoint % 2 == 1) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
@@ -47,8 +47,8 @@ float gridOperation2(const float leftMatrix, const float centerMatrix, const flo
     float gridValue = centerX;
     switch(method)
     {
-        case JACOBI:
-	    return gridValue;
+	case JACOBI:
+            return gridValue;
 	case GS:
 	    if (gridPoint % 2 == 0) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
@@ -281,9 +281,8 @@ void __jacobiBlockUpperTriangleFromShared(
             float centerMat = centerMatrixBlock[threadIdx.x];
             float rightMat = rightMatrixBlock[threadIdx.x];
             float rhs = rhsBlock[threadIdx.x];
-	    // Select which kernel to use
 	    x1[threadIdx.x] = gridOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
-            leftX = x1[threadIdx.x - 1];
+	    leftX = x1[threadIdx.x - 1];
             centerX = x1[threadIdx.x];
             rightX = x1[threadIdx.x + 1];
 	    if (iGrid == 0) {
@@ -384,9 +383,6 @@ void __jacobiBlockLowerTriangleFromShared(
     float leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x0[threadIdx.x - 1];
     float centerX = x0[threadIdx.x];
     float rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x0[threadIdx.x + 1];
-    //float leftX = x0[threadIdx.x - 1];
-    //float centerX = x0[threadIdx.x];
-    //float rightX = x0[threadIdx.x + 1];
     if (iGrid == 0) {
        leftX = 0.0;    
     }
@@ -400,6 +396,9 @@ void __jacobiBlockLowerTriangleFromShared(
     leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
     centerX = x1[threadIdx.x];
     rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
+    /*leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1];
+    centerX = x1[threadIdx.x];
+    rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];*/
     if (iGrid == 0) {
         leftX = 0.0f;
     }
@@ -667,8 +666,10 @@ int main(int argc, char *argv[])
     printf("Time needed for the Swept GPU (per iteration): %f ms\n", sweptTimePerIteration);
 
     // Compute the residual of the resulting solution (|b-Ax|)
-    float residual = Residual(solutionGpuSwept, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    printf("Residual of the converged solution is %f\n", residual);
+    float residualClassic = Residual(solutionGpuClassic, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    float residualSwept = Residual(solutionGpuSwept, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    printf("Residual of the converged solution is %f\n", residualSwept);
+    printf("Residual of Classic result is %f\n", residualClassic);
   
     /*float exactSolution[nGrids];
     std::ifstream input("exactSolution.txt");
