@@ -30,6 +30,7 @@ float gridOperation(const float leftMatrix, const float centerMatrix, const floa
 	    if (gridPoint % 2 == 1) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
 	    }
+        // TODO: else gridValue = centerX;
 	case SOR:
 	    if (gridPoint % 2 == 1) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
@@ -264,7 +265,7 @@ void __jacobiBlockUpperTriangleFromShared(
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x; 
 
-    #pragma unroll
+    #pragma unroll // TODO: is it useful? check if the compiler knows blockDim.x in compile time.
     for (int k = 1; k < blockDim.x/2; ++k) {
         if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1) {
             float leftX = x0[threadIdx.x - 1];
@@ -493,7 +494,10 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
-float * jacobiGpuSwept(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, int nGrids, int nIters, const int threadsPerBlock, const int method) { 
+float * jacobiGpuSwept(const float * initX, const float * rhs,
+        const float * leftMatrix, const float * centerMatrix,
+        const float * rightMatrix, int nGrids, int nIters,
+        const int threadsPerBlock, const int method) { 
     
     // Determine number of threads and blocks 
     const int nBlocks = (int)ceil(nGrids / (float)threadsPerBlock);
@@ -604,7 +608,8 @@ int main(int argc, char *argv[])
 
     // Run the CPU Implementation and measure the time required
     clock_t cpuStartTime = clock();
-    float * solutionCpu = jacobiCpu(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, method);
+    float * solutionCpu = jacobiCpu(initX, rhs, leftMatrix, centerMatrix,
+                                    rightMatrix, nGrids, nIters, method);
     clock_t cpuEndTime = clock();
     double cpuTime = (cpuEndTime - cpuStartTime) / (double) CLOCKS_PER_SEC;
 
@@ -614,7 +619,8 @@ int main(int argc, char *argv[])
     cudaEventCreate( &startClassic );
     cudaEventCreate( &stopClassic );
     cudaEventRecord(startClassic, 0);
-    float * solutionGpuClassic = jacobiGpuClassic(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
+    float * solutionGpuClassic = jacobiGpuClassic(initX, rhs, leftMatrix,
+            centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopClassic, 0);
     cudaEventSynchronize(stopClassic);
     cudaEventElapsedTime(&timeClassic, startClassic, stopClassic);
@@ -625,7 +631,9 @@ int main(int argc, char *argv[])
     cudaEventCreate( &startSwept );
     cudaEventCreate( &stopSwept );
     cudaEventRecord( startSwept, 0);
-    float * solutionGpuSwept = jacobiGpuSwept(initX, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
+    // TODO: change the name of jacobiXXX since they are not just doing jacobi
+    float * solutionGpuSwept = jacobiGpuSwept(initX, rhs, leftMatrix,
+            centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopSwept, 0);
     cudaEventSynchronize(stopSwept);
     cudaEventElapsedTime(&timeSwept, startSwept, stopSwept);
