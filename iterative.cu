@@ -19,7 +19,7 @@ enum method_type { JACOBI, GS, SOR };
 
 template <typename method_type>
 __host__ __device__
-float gridOperation(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
+float iterativeOperation(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
 {
     float gridValue = centerX;
     switch(method)
@@ -30,7 +30,6 @@ float gridOperation(const float leftMatrix, const float centerMatrix, const floa
 	    if (gridPoint % 2 == 1) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
 	    }
-        // TODO: else gridValue = centerX;
 	case SOR:
 	    if (gridPoint % 2 == 1) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
@@ -42,13 +41,13 @@ float gridOperation(const float leftMatrix, const float centerMatrix, const floa
 
 template <typename method_type>
 __host__ __device__
-float gridOperation2(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
+float iterativeOperation2(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, int gridPoint, method_type method)
 {
     float gridValue = centerX;
     switch(method)
     {
-	case JACOBI:
-            return gridValue;
+	case JACOBI:	
+	    return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
 	case GS:
 	    if (gridPoint % 2 == 0) {
 	        return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
@@ -153,7 +152,7 @@ float solutionError(float * solution, float * exactSolution, int nGrids)
 }
 
 
-float * jacobiCpu(const float * initX, const float * rhs,
+float * iterativeCpu(const float * initX, const float * rhs,
                   const float * leftMatrix, const float * centerMatrix,
                   const float * rightMatrix, int nGrids, int nIters, int method)
 {
@@ -166,13 +165,16 @@ float * jacobiCpu(const float * initX, const float * rhs,
             float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
             float centerX = x0[iGrid];
             float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-            x1[iGrid] = gridOperation(leftMatrix[iGrid], centerMatrix[iGrid],
+	    if (iIter % 2 == 0) {
+                x1[iGrid] = iterativeOperation(leftMatrix[iGrid], centerMatrix[iGrid],
                                     rightMatrix[iGrid], leftX, centerX, rightX,
                                     rhs[iGrid], iGrid, method);
-      	    leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-	    centerX = x1[iGrid];
-	    rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-	    x1[iGrid] = gridOperation2(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid], iGrid, method);
+	    }
+	    else { 
+                x1[iGrid] = iterativeOperation2(leftMatrix[iGrid], centerMatrix[iGrid],
+                                    rightMatrix[iGrid], leftX, centerX, rightX,
+                                    rhs[iGrid], iGrid, method);
+            }
         }
         float * tmp = x0; x0 = x1; x1 = tmp;
     }
@@ -182,7 +184,7 @@ float * jacobiCpu(const float * initX, const float * rhs,
 
 
 __global__
-void _jacobiGpuClassicIteration(float * x1,
+void _iterativeGpuClassicIteration(float * x1,
                          const float * x0, const float * rhs,
                          const float * leftMatrix, const float * centerMatrix,
                          const float * rightMatrix, int nGrids, int iteration, int method)
@@ -192,18 +194,21 @@ void _jacobiGpuClassicIteration(float * x1,
         float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
         float centerX = x0[iGrid];
         float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
-        x1[iGrid] = gridOperation(leftMatrix[iGrid], centerMatrix[iGrid],
+	if (iteration % 2 == 0) {
+            x1[iGrid] = iterativeOperation(leftMatrix[iGrid], centerMatrix[iGrid],
                                     rightMatrix[iGrid], leftX, centerX, rightX,
                                     rhs[iGrid], iGrid, method);
-	leftX = (iGrid > 0) ? x1[iGrid - 1] : 0.0f;
-	centerX = x1[iGrid];
-	rightX = (iGrid < nGrids - 1) ? x1[iGrid + 1] : 0.0f;
-	x1[iGrid] = gridOperation2(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid], iGrid, method);
+	}
+	else { 
+            x1[iGrid] = iterativeOperation2(leftMatrix[iGrid], centerMatrix[iGrid],
+                                    rightMatrix[iGrid], leftX, centerX, rightX,
+                                    rhs[iGrid], iGrid, method);
+	}
     }
     __syncthreads();
 }
 
-float * jacobiGpuClassic(const float * initX, const float * rhs,
+float * iterativeGpuClassic(const float * initX, const float * rhs,
                          const float * leftMatrix, const float * centerMatrix,
                          const float * rightMatrix, int nGrids, int nIters,
                          const int threadsPerBlock, int method)
@@ -233,7 +238,7 @@ float * jacobiGpuClassic(const float * initX, const float * rhs,
     int nBlocks = (int)ceil(nGrids / (float)threadsPerBlock);
     for (int iIter = 0; iIter < nIters; ++iIter) {
 	// Jacobi iteration on the CPU
-        _jacobiGpuClassicIteration<<<nBlocks, threadsPerBlock>>>(
+        _iterativeGpuClassicIteration<<<nBlocks, threadsPerBlock>>>(
                 x1Gpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
                 rightMatrixGpu, nGrids, iIter, method); 
         float * tmp = x1Gpu; x0Gpu = x1Gpu; x1Gpu = tmp;
@@ -257,7 +262,7 @@ float * jacobiGpuClassic(const float * initX, const float * rhs,
 
 
 __device__ 
-void __jacobiBlockUpperTriangleFromShared(
+void __iterativeBlockUpperTriangleFromShared(
 		float * xLeftBlock, float *xRightBlock, const float *rhsBlock,
 		const float * leftMatrixBlock, const float * centerMatrixBlock,
                 const float * rightMatrixBlock, int nGrids, int iGrid, int method)
@@ -281,17 +286,12 @@ void __jacobiBlockUpperTriangleFromShared(
             float centerMat = centerMatrixBlock[threadIdx.x];
             float rightMat = rightMatrixBlock[threadIdx.x];
             float rhs = rhsBlock[threadIdx.x];
-	    x1[threadIdx.x] = gridOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
-	    leftX = x1[threadIdx.x - 1];
-            centerX = x1[threadIdx.x];
-            rightX = x1[threadIdx.x + 1];
-	    if (iGrid == 0) {
-		leftX = 0.0f;
+	    if (k % 2 == 1) {
+	        x1[threadIdx.x] = iterativeOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 	    }
-	    if (iGrid == nGrids-1) {
-		rightX = 0.0f;
+	    else {
+	        x1[threadIdx.x] = iterativeOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 	    }
-	    x1[threadIdx.x] = gridOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
         }
         __syncthreads();	
 	float * tmp = x1; x1 = x0; x0 = tmp;
@@ -306,7 +306,7 @@ void __jacobiBlockUpperTriangleFromShared(
 }
 
 __global__
-void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
+void _iterativeGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
                              const float * x0Gpu, const float *rhsGpu, 
                              const float * leftMatrixGpu, const float *centerMatrixGpu,
                              const float * rightMatrixGpu, int nGrids, int method)
@@ -326,12 +326,12 @@ void _jacobiGpuUpperTriangle(float * xLeftGpu, float *xRightGpu,
     sharedMemory[threadIdx.x] = x0Block[threadIdx.x];
     sharedMemory[threadIdx.x + blockDim.x] = x0Block[threadIdx.x];
 
-    __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
     		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
 
 __device__ 
-void __jacobiBlockLowerTriangleFromShared(
+void __iterativeBlockLowerTriangleFromShared(
 		const float * xLeftBlock, const float *xRightBlock, const float *rhsBlock,
 		const float * leftMatrixBlock, const float * centerMatrixBlock,
                 const float * rightMatrixBlock, int nGrids, int iGrid, int method)
@@ -362,18 +362,13 @@ void __jacobiBlockLowerTriangleFromShared(
 		float leftMat = leftMatrixBlock[threadIdx.x];
 		float centerMat = centerMatrixBlock[threadIdx.x];
  		float rightMat = rightMatrixBlock[threadIdx.x];
-		float rhs = rhsBlock[threadIdx.x]; 
-	        x1[threadIdx.x] = gridOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
-		leftX = x1[threadIdx.x - 1];
-		centerX = x1[threadIdx.x];
-		rightX = x1[threadIdx.x + 1];
-		if (iGrid == 0) {
-		    leftX = 0.0f;
+		float rhs = rhsBlock[threadIdx.x];
+	        if (k % 2 == 1) {	
+	            x1[threadIdx.x] = iterativeOperation(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 		}
-		if (iGrid == nGrids-1) {
-		    rightX = 0.0f;
+		else {
+		    x1[threadIdx.x] = iterativeOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 		}
-		x1[threadIdx.x] = gridOperation2(leftMat, centerMat, rightMat, leftX, centerX, rightX, rhs, iGrid, method);
 	    }
  	    float * tmp = x1; x1 = x0; x0 = tmp;
         }
@@ -389,29 +384,18 @@ void __jacobiBlockLowerTriangleFromShared(
     if (iGrid == nGrids-1) {
         rightX = 0.0;
     }
-    x1[threadIdx.x] = gridOperation(leftMatrixBlock[threadIdx.x],
+    // The last step! - Should i just perform one of the grid operations
+    // The last step of the for loop above uses k = 1 where gridOperation is used, so I'll use gridOperation2 here
+    x1[threadIdx.x] = iterativeOperation2(leftMatrixBlock[threadIdx.x],
                                 centerMatrixBlock[threadIdx.x],
                                 rightMatrixBlock[threadIdx.x],
                                 leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid, method);
-    leftX = (threadIdx.x == 0) ? xLeftBlock[blockDim.x - 1] : x1[threadIdx.x - 1];
-    centerX = x1[threadIdx.x];
-    rightX = (threadIdx.x == blockDim.x-1) ? xRightBlock[blockDim.x - 1] : x1[threadIdx.x + 1];
-    /*leftX = (threadIdx.x == 0) ? x1[blockDim.x - 1] : x1[threadIdx.x - 1];
-    centerX = x1[threadIdx.x];
-    rightX = (threadIdx.x == blockDim.x-1) ? x1[0] : x1[threadIdx.x + 1];*/
-    if (iGrid == 0) {
-        leftX = 0.0f;
-    }
-    if (iGrid == nGrids - 1) {
-	rightX = 0.0f;
-    }
-    x1[threadIdx.x] = gridOperation2(leftMatrixBlock[threadIdx.x], centerMatrixBlock[threadIdx.x], rightMatrixBlock[threadIdx.x], leftX, centerX, rightX, rhsBlock[threadIdx.x], iGrid, method);
     float * tmp = x1; x1 = x0; x0 = tmp; 
 
 }
 
 __global__
-void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
+void _iterativeGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
                              float * xRightGpu, float *rhsGpu, 
                              float * leftMatrixGpu, float *centerMatrixGpu,
                              float * rightMatrixGpu, int nGrids, int method)
@@ -429,7 +413,7 @@ void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
     
     extern __shared__ float sharedMemory[];
     
-    __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                          leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 
     x0Block[threadIdx.x] = sharedMemory[threadIdx.x];
@@ -437,7 +421,7 @@ void _jacobiGpuLowerTriangle(float * x0Gpu, float *xLeftGpu,
 }
 
 __global__       
-void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
+void _iterativeGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
                               float * rhsGpu, 
 			      float * leftMatrixGpu, float * centerMatrixGpu,
                               float * rightMatrixGpu, int nGrids, int method)
@@ -460,16 +444,16 @@ void _jacobiGpuShiftedDiamond(float * xLeftGpu, float * xRightGpu,
     
     extern __shared__ float sharedMemory[];
     
-    __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                          leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);  
 
-    __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                        leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 
 }
 
 __global__
-void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
+void _iterativeGpuDiamond(float * xLeftGpu, float * xRightGpu,
                        const float * rhsGpu,
 		       const float * leftMatrixGpu, const float * centerMatrixGpu,
                        const float * rightMatrixGpu, int nGrids, int method)
@@ -487,13 +471,13 @@ void _jacobiGpuDiamond(float * xLeftGpu, float * xRightGpu,
     
     extern __shared__ float sharedMemory[];
 
-    __jacobiBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockLowerTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                         leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
     
-    __jacobiBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
+    __iterativeBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
-float * jacobiGpuSwept(const float * initX, const float * rhs,
+float * iterativeGpuSwept(const float * initX, const float * rhs,
         const float * leftMatrix, const float * centerMatrix,
         const float * rightMatrix, int nGrids, int nIters,
         const int threadsPerBlock, const int method) { 
@@ -534,31 +518,31 @@ float * jacobiGpuSwept(const float * initX, const float * rhs,
 
     int sharedFloatsPerBlock = threadsPerBlock * 2;
 
-    _jacobiGpuUpperTriangle <<<nBlocks, threadsPerBlock,
+    _iterativeGpuUpperTriangle <<<nBlocks, threadsPerBlock,
         sizeof(float) * sharedFloatsPerBlock>>>(
                 xLeftGpu, xRightGpu,
                 x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
                 rightMatrixGpu, nGrids, method);
-    _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
+    _iterativeGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
                     rightMatrixGpu, nGrids, method);
 
     for (int i = 0; i < nIters/threadsPerBlock-1; i++) {
-    _jacobiGpuDiamond <<<nBlocks, threadsPerBlock,
+    _iterativeGpuDiamond <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
                         rightMatrixGpu, nGrids, method); 
-    _jacobiGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
+    _iterativeGpuShiftedDiamond <<<nBlocks, threadsPerBlock,
             sizeof(float) * sharedFloatsPerBlock>>>(
                     xLeftGpu, xRightGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
                     rightMatrixGpu, nGrids, method); 
     }
 
-    _jacobiGpuLowerTriangle <<<nBlocks, threadsPerBlock,
+    _iterativeGpuLowerTriangle <<<nBlocks, threadsPerBlock,
                 sizeof(float) * sharedFloatsPerBlock>>>(
                         x0Gpu, xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
@@ -607,7 +591,7 @@ int main(int argc, char *argv[])
 
     // Run the CPU Implementation and measure the time required
     clock_t cpuStartTime = clock();
-    float * solutionCpu = jacobiCpu(initX, rhs, leftMatrix, centerMatrix,
+    float * solutionCpu = iterativeCpu(initX, rhs, leftMatrix, centerMatrix,
                                     rightMatrix, nGrids, nIters, method);
     clock_t cpuEndTime = clock();
     double cpuTime = (cpuEndTime - cpuStartTime) / (double) CLOCKS_PER_SEC;
@@ -618,7 +602,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &startClassic );
     cudaEventCreate( &stopClassic );
     cudaEventRecord(startClassic, 0);
-    float * solutionGpuClassic = jacobiGpuClassic(initX, rhs, leftMatrix,
+    float * solutionGpuClassic = iterativeGpuClassic(initX, rhs, leftMatrix,
             centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopClassic, 0);
     cudaEventSynchronize(stopClassic);
@@ -631,7 +615,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &stopSwept );
     cudaEventRecord( startSwept, 0);
     // TODO: change the name of jacobiXXX since they are not just doing jacobi
-    float * solutionGpuSwept = jacobiGpuSwept(initX, rhs, leftMatrix,
+    float * solutionGpuSwept = iterativeGpuSwept(initX, rhs, leftMatrix,
             centerMatrix, rightMatrix, nGrids, nIters, threadsPerBlock, method);
     cudaEventRecord(stopSwept, 0);
     cudaEventSynchronize(stopSwept);
