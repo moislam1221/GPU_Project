@@ -570,7 +570,7 @@ int main(int argc, char *argv[])
     const int threadsPerBlock = atoi(argv[2]); 
     const int nIters = atoi(argv[3]);
 
-    method_type method = JACOBI;
+    method_type method = GS;
 
     // Declare arrays and population with values for Poisson equation
     float * initX = new float[nGrids];
@@ -630,44 +630,36 @@ int main(int argc, char *argv[])
     printf("\n");
 
     // Print out results to the screen, notify if any GPU Classic or Swept values differ significantly
-    for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
+    /* for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
         printf("%d %f %f %f \n",iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
 	//assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
-	/*if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-2) {
+	if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-2) {
 	    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
-	}*/
-    } 
+	}
+    } */
 
     // Print out time for cpu, classic gpu, and swept gpu approaches
     float cpuTimePerIteration = (cpuTime / nIters) * 1e3;
     float classicTimePerIteration = timeClassic / nIters;
     float sweptTimePerIteration = timeSwept / nIters;
     float timeMultiplier = classicTimePerIteration / sweptTimePerIteration;
-    printf("Time needed for the CPU (per iteration): %f ms\n", cpuTimePerIteration);
+    /* printf("Time needed for the CPU (per iteration): %f ms\n", cpuTimePerIteration);
     printf("Time needed for the Classic GPU (per iteration) is %f ms\n", classicTimePerIteration);
-    printf("Time needed for the Swept GPU (per iteration): %f ms\n", sweptTimePerIteration);
+    printf("Time needed for the Swept GPU (per iteration): %f ms\n", sweptTimePerIteration); */
 
     // Compute the residual of the resulting solution (|b-Ax|)
     float residualClassic = Residual(solutionGpuClassic, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
     float residualSwept = Residual(solutionGpuSwept, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    printf("Residual of the converged solution is %f\n", residualSwept);
-    printf("Residual of Classic result is %f\n", residualClassic);
+/*    printf("Residual of the converged solution is %f\n", residualSwept);
+    printf("Residual of Classic result is %f\n", residualClassic); */
   
-    /*float exactSolution[nGrids];
-    std::ifstream input("exactSolution.txt");
-    ifor (int i = 0; i < nGrids; i++)
-    {
-        input >> exactSolution[i];
-        // printf("Data is %f\n", exactSolution[i]);
-    }
-    
-    //exactSolution = readExactSolution(nGrids);
-
-    float error = solutionError(solutionGpuSwept, exactSolution, nGrids);
-
-    printf("The error is %f\n", error); */
+    // Save residual to a file
+    std::ofstream residuals;
+    residuals.open("residual-gs.txt",std::ios_base::app);
+    residuals << nGrids << "\t" << threadsPerBlock << "\t" << nIters << "\t" << residualSwept << "\n";
+    residuals.close();
 
     // Save Results to a file "N tpb Iterations CPUTime/perstep ClassicTime/perstep SweptTime/perStep ClassicTime/SweptTime"
     std::ofstream timings;
