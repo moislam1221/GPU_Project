@@ -290,61 +290,108 @@ double * iterativeGpuClassic(const double * initX, const double * rhs,
 
     return solution;
 }
-/*
+
 __device__ 
 void __iterativeBlockUpperPyramidalFromShared(
-		double * xLeftBlock, double *xRightBlock, const double *rhsBlock,
+		double * xLeftBlock, double *xRightBlock, double *xTopBlock, double *xBottomBlock, const double *rhsBlock,
 		const double * leftMatrixBlock, const double * centerMatrixBlock,
-                const double * rightMatrixBlock, int nGrids, int iGrid, int method)
+                const double * rightMatrixBlock, const double * topMatrixBlock, const double * bottomMatrixBlock,
+	       	int nxGrids, int nyGrids, int iGrid, int method)
 {
     extern __shared__ double sharedMemory[];
-    double * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x; 
+    double * x0 = sharedMemory, * x1 = sharedMemory + blockDim.x * blockDim.y; 
 
-    idx = threadIdx.x * blockDim.x * threadIdx.y;
-    for (int k = 1; k < blockDim.x/2; ++k) {
+    int idx = threadIdx.x + blockDim.x * threadIdx.y;
+    
+    printf("Idx %d, initial solution %f\n", idx, x0[idx]);
+    for (int k = 0; k <= blockDim.x/2-1; ++k) {
+           printf("Time step %d\n", k); 
         if (threadIdx.x >= k && threadIdx.x <= blockDim.x-k-1 && threadIdx.y >= k && threadIdx.y <= blockDim.y-k-1) {
+        
+	// Bottom 
+        if (threadIdx.y == k)
+        {
+	    xBottomBlock[threadIdx.x-k+(2*k)*(blockDim.x-(k-1))] = x0[idx];
+     	}
+	if (threadIdx.y == k + 1)
+    	{
+            xBottomBlock[threadIdx.x-k+(2*k)*(blockDim.x-k) + blockDim.x] = x0[idx];
+    	}
+
+	// Top
+        if (threadIdx.y == blockDim.x - 1 - k)
+    	{
+	    xTopBlock[threadIdx.x-k+(2*k)*(blockDim.x-(k-1))] = x0[idx];
+    	}
+	if (threadIdx.y == blockDim.x - 2 - k)
+    	{
+            xTopBlock[threadIdx.x-k+(2*k)*(blockDim.x-k) + blockDim.x] = x0[idx];
+      	}
+	
+        // Left
+        if (threadIdx.x == k)
+        {
+            xLeftBlock[threadIdx.y-k + (2*k)*(blockDim.x-(k-1))] = x0[idx];
+        }
+        if (threadIdx.x == k + 1)
+        {
+            xLeftBlock[threadIdx.y-k + (2*k)*(blockDim.x-(k)) + blockDim.x] = x0[idx];
+        }
+
+        // Right
+        if (threadIdx.x == blockDim.x - 1 - k)
+        {
+            xRightBlock[threadIdx.y-k + (2*k)*(blockDim.x-(k-1))] = x0[idx];
+        }
+        if (threadIdx.x == blockDim.x - 2 - k)
+        {
+            xRightBlock[threadIdx.y-k + (2*k)*(blockDim.x-(k)) + blockDim.x] = x0[idx];
+        }    
+
+	}
+
+        if (threadIdx.x > k && threadIdx.x < blockDim.x-k-1 && threadIdx.y > k && threadIdx.y < blockDim.y-k-1) {
 	    
 	    double leftX = ((iGrid % nxGrids) == 0) ? 0.0f : x0[idx - 1];
             double centerX = x0[idx];
             double rightX = (((iGrid + 1) % nxGrids) == 0) ? 0.0f : x0[idx + 1];
 	    double bottomX = (iGrid < nxGrids) ? 0.0f : x0[idx - blockDim.x];
-            double topX = (iGrid < nDofs - nxGrids) ? x0[idx + blockDim.x] : 0.0f;
+            double topX = (iGrid < nxGrids*(nyGrids-1)) ? x0[idx + blockDim.x] : 0.0f;
             
 	    double leftMat = leftMatrixBlock[idx];
             double centerMat = centerMatrixBlock[idx];
             double rightMat = rightMatrixBlock[idx];
-	    double topMat = topMatrixBlock[idx];
-	    double bottomMat = bottomMatrixBlock[idx];
+      	    double topMat = topMatrixBlock[idx];
+            double bottomMat = bottomMatrixBlock[idx];
             double rhs = rhsBlock[idx];
 	    
-	    if (k % 2 == 1) {
-	        x1[threadIdx.x] = iterativeOperation(leftMat, centerMat, rightMat, topMat, bottomMat, 
-				                     leftX, centerX, rightX, topX, bottomX, rhs, iGrid, method);
-	    }
+            if (k % 2 == 0) {
+                x1[idx] = centerX; /*iterativeOperation(leftMat, centerMat, rightMat, topMat, bottomMat, 
+				                     leftX, centerX, rightX, topX, bottomX, rhs, iGrid, method); */
+            }
 	    else {
-	        x1[threadIdx.x] = iterativeOperation2(leftMat, centerMat, rightMat, topMat, bottomMat,
-				                      leftX, centerX, rightX, topX, bottomX, rhs, iGrid, method);
+	        x1[idx] = centerX;/* iterativeOperation2(leftMat, centerMat, rightMat, topMat, bottomMat,
+				                      leftX, centerX, rightX, topX, bottomX, rhs, iGrid, method); */
 	    }
         }
-        __syncthreads();	
-	double * tmp = x1; x1 = x0; x0 = tmp;
-    } 
+        
+	__syncthreads();	
+    	double * tmp = x1; x1 = x0; x0 = tmp;
     
-    double * tmp = x1; x1 = x0; x0 = tmp;
+    } 
 
-    int remainder = threadIdx.x % 4;
-    xLeftBlock[threadIdx.x] = x0[(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
-    xRightBlock[threadIdx.x] = x0[blockDim.x-1-(threadIdx.x+1)/2 + blockDim.x*(remainder > 1)];
+    printf("Idx %d, Top %f, Bottom %f, Left %f, Right %f\n", idx, xTopBlock[idx], xBottomBlock[idx], xLeftBlock[idx], xRightBlock[idx]);    
+    printf("Idx %d, SharedMemoryValue %f\n", idx, x0[idx]);
+    double * tmp = x1; x1 = x0; x0 = tmp;
 
 }
 
 __global__
-void _iterativeGpuUpperPyramidal(double * xLeftGpu, double *xRightGpu,
+void _iterativeGpuUpperPyramidal(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                              const double * x0Gpu, const double *rhsGpu, 
-                             const double * leftMatrixGpu, const double *centerMatrixGpu,
-                             const double * rightMatrixGpu, int nGrids, int method)
+                             const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
+			     const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method)
 {
-    
     int xShift = blockDim.x * blockIdx.x;
     int yShift = blockDim.y * blockIdx.y;
 
@@ -352,35 +399,60 @@ void _iterativeGpuUpperPyramidal(double * xLeftGpu, double *xRightGpu,
 
     double * xLeftBlock = xLeftGpu + blockShift;
     double * xRightBlock = xRightGpu + blockShift;
+    double * xTopBlock = xTopGpu + blockShift;
+    double * xBottomBlock = xBottomGpu + blockShift;
     const double * x0Block = x0Gpu + blockShift;
     const double * rhsBlock = rhsGpu + blockShift;
     const double * leftMatrixBlock = leftMatrixGpu + blockShift;
     const double * centerMatrixBlock = centerMatrixGpu + blockShift;
     const double * rightMatrixBlock = rightMatrixGpu + blockShift;
-   
-    for (int i = 0; i < blockDim.y; i++)
-    { 
-	 int rowShift = i * nxGrids;
-       	 (*x0Block)[i] = x0Gpu + blockShift + i * rowShift;
-      	 (*rhsBlock)[i] = rhsGpu + blockShift + i * rowShift;
-         (*leftMatrixBlock)[i] = leftMatrixGpu + i * rowShift;
-         (*centerMatrixBlock)[i] = centerMatrixGpu + i * rowShift;
-	 (*rightMatrixBlock)[i] = rightMatrixGpu + i * rowShift;
-         (*topMatrixBlock)[i] = topMatrixGpu + i * rowShift;
-	 (*bottomMatrixBlock)[i] = bottomMatrixGpu + i * rowShift;
-    }
+    const double * topMatrixBlock = topMatrixGpu + blockShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift;
 
     int idx = threadIdx.x + threadIdx.y * nxGrids;
     int iGrid = blockShift + idx;
+    
+    extern __shared__ double sharedMemory[];
+    sharedMemory[threadIdx.x + threadIdx.y * blockDim.x] = x0Block[threadIdx.x + threadIdx.y * nxGrids];
 
-    extern __shared__ double sharedMemory[][blockDim.x];
-    sharedMemory[threadIdx.x] = x0Block[threadIdx.x];
-    sharedMemory[threadIdx.x + blockDim.x] = x0Block[threadIdx.x];
-
-    __iterativeBlockUpperPyramidalFromShared(xLeftBlock, xRightBlock, rhsBlock,
-    		                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
+    __iterativeBlockUpperPyramidalFromShared(xLeftBlock, xRightBlock, xTopBlock, xBottomBlock, rhsBlock,
+    		                             leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
+					     nxGrids, nyGrids, iGrid, method);
 }
 
+__global__       
+void _iterativeGpuBuildingBridges(double * xLeftGpu, double * xRightGpu, double * xTopGpu, double * xBottomGpu,
+                                  double * rhsGpu, double * leftMatrixGpu, double * centerMatrixGpu, double * rightMatrixGpu, 
+				  double * topMatrixGpu, double * bottomMatrixGpu
+				  int nxGrids, int nyGrids, int method)
+{
+    int blockShift = blockDim.x * blockIdx.x;
+    double * xLeftBlock = xRightGpu + blockShift;
+    double * xRightBlock = (blockIdx.x == (gridDim.x-1)) ?
+                          xLeftGpu : 
+                          xLeftGpu + blockShift + blockDim.x;
+
+    int iGrid = blockIdx.x * blockDim.x + threadIdx.x + blockDim.x/2;
+    iGrid = (iGrid < nGrids) ? iGrid : threadIdx.x - blockDim.x/2;
+
+    int indexShift = blockDim.x/2;
+    double * rhsBlock = rhsGpu + blockShift + indexShift;
+    double * leftMatrixBlock = leftMatrixGpu + blockShift + indexShift;
+    double * centerMatrixBlock = centerMatrixGpu + blockShift + indexShift;
+    double * rightMatrixBlock = rightMatrixGpu + blockShift + indexShift;
+    
+    extern __shared__ double sharedMemory[];
+    
+    __iterativeBlockLongitudinalBridge(xTopBlock, xBottomBlock, rhsBlock,
+                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
+				       nxGrids, nyGrids, iGrid, method);  
+
+    __iterativeBlockLatitudinalBridge(xLeftBlock, xRightBlock, rhsBlock,
+                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
+				       nxGrids, nyGrids, iGrid, method);  
+
+}
+/*
 __device__ 
 void __iterativeBlockLowerTriangleFromShared(
 		const double * xLeftBlock, const double *xRightBlock, const double *rhsBlock,
@@ -528,7 +600,7 @@ void _iterativeGpuDiamond(double * xLeftGpu, double * xRightGpu,
     __iterativeBlockUpperTriangleFromShared(xLeftBlock, xRightBlock, rhsBlock,
                                       leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, iGrid, method);
 }
-
+*/
 double * iterativeGpuSwept(const double * initX, const double * rhs,
         const double * leftMatrix, const double * centerMatrix,
         const double * rightMatrix, const double * topMatrix, const double * bottomMatrix,
@@ -537,20 +609,25 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
     // Determine number of threads and blocks 
     const int nxBlocks = (int)ceil(nxGrids / (double)threadsPerBlock);
     const int nyBlocks = (int)ceil(nyGrids / (double)threadsPerBlock);
+    const int nDofs = nxGrids * nyGrids;
 
     dim3 grid(nxBlocks, nyBlocks);
     dim3 block(threadsPerBlock, threadsPerBlock);
     
     // Allocate memory for solution and inputs
-    double *xLeftGpu, *xRightGpu;
-    cudaMalloc(&xLeftGpu, sizeof(double) * threadsPerBlock * nBlocks);
-    cudaMalloc(&xRightGpu, sizeof(double) * threadsPerBlock * nBlocks);
-    double * x0Gpu, * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu;
-    cudaMalloc(&x0Gpu, sizeof(double) * (nGrids + threadsPerBlock/2));
-    cudaMalloc(&rhsGpu, sizeof(double) * (nGrids + threadsPerBlock/2));
-    cudaMalloc(&leftMatrixGpu, sizeof(double) * (nGrids + threadsPerBlock/2));
-    cudaMalloc(&centerMatrixGpu, sizeof(double) * (nGrids + threadsPerBlock/2));
-    cudaMalloc(&rightMatrixGpu, sizeof(double) * (nGrids + threadsPerBlock/2));
+    double *xLeftGpu, *xRightGpu, *xTopGpu, *xBottomGpu;
+    cudaMalloc(&xLeftGpu, sizeof(double) * threadsPerBlock * nxBlocks);
+    cudaMalloc(&xRightGpu, sizeof(double) * threadsPerBlock * nxBlocks);
+    cudaMalloc(&xTopGpu, sizeof(double) * threadsPerBlock * nxBlocks);
+    cudaMalloc(&xBottomGpu, sizeof(double) * threadsPerBlock * nxBlocks);
+    double * x0Gpu, * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu, * topMatrixGpu, * bottomMatrixGpu;
+    cudaMalloc(&x0Gpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&rhsGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&leftMatrixGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&centerMatrixGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&rightMatrixGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&topMatrixGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
+    cudaMalloc(&bottomMatrixGpu, sizeof(double) * (nDofs + threadsPerBlock/2));
 
     // Allocate memory in the GPU
     cudaMemcpy(x0Gpu, initX, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
@@ -561,9 +638,13 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
             cudaMemcpyHostToDevice);
     cudaMemcpy(rightMatrixGpu, rightMatrix, sizeof(double) * nDofs,
             cudaMemcpyHostToDevice);
+    cudaMemcpy(topMatrixGpu, topMatrix, sizeof(double) * nDofs,
+            cudaMemcpyHostToDevice);
+    cudaMemcpy(bottomMatrixGpu, bottomMatrix, sizeof(double) * nDofs,
+            cudaMemcpyHostToDevice);
 
     // Allocate a bit more memory to avoid memcpy within shifted kernels
-    cudaMemcpy(x0Gpu + nGrids, initX, sizeof(double) * threadsPerBlock/2, cudaMemcpyHostToDevice);
+    /*cudaMemcpy(x0Gpu + nGrids, initX, sizeof(double) * threadsPerBlock/2, cudaMemcpyHostToDevice);
     cudaMemcpy(rhsGpu + nGrids, rhs, sizeof(double) * threadsPerBlock/2, cudaMemcpyHostToDevice);
     cudaMemcpy(leftMatrixGpu + nGrids, leftMatrix, sizeof(double) * threadsPerBlock/2,
             cudaMemcpyHostToDevice);
@@ -571,10 +652,11 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
             cudaMemcpyHostToDevice);
     cudaMemcpy(rightMatrixGpu + nGrids, rightMatrix, sizeof(double) * threadsPerBlock/2,
             cudaMemcpyHostToDevice);
+    */
 
-    int sharedFloatsPerBlock = threadsPerBlock * 2;
+    int sharedFloatsPerBlock = threadsPerBlock * threadsPerBlock * 2;
 
-    double residualSwept;
+/*    double residualSwept;
     double nCycles = nIters / threadsPerBlock;
     double * currentSolution = new double[nGrids];
     std::ofstream residuals;
@@ -591,18 +673,20 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
     }
    
     residuals.close();
-
-    _iterativeGpuUpperTriangle <<<grid, block,
+*/
+    _iterativeGpuUpperPyramidal <<<grid, block,
         sizeof(double) * sharedFloatsPerBlock>>>(
-                xLeftGpu, xRightGpu,
+                xLeftGpu, xRightGpu, xTopGpu, xBottomGpu,
                 x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                rightMatrixGpu, nGrids, method);
-    _iterativeGpuShiftedDiamond <<<grid, block,
+                rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, 
+		nxGrids, nyGrids, method);
+    _iterativeGpuLongitudinalBridge <<<grid, block,
             sizeof(double) * sharedFloatsPerBlock>>>(
-                    xLeftGpu, xRightGpu,
+                    xLeftGpu, xRightGpu, xTopGpu, xBottomGpu,
                     rhsGpu, leftMatrixGpu, centerMatrixGpu,
-                    rightMatrixGpu, nGrids, method);
-
+                    rightMatrixGpu, topMatrixGpu, bottomMatrixGpu,
+		    nxGrids, nyGrids, method);
+/*
     for (int i = 0; i < nIters/threadsPerBlock-1; i++) {
     _iterativeGpuDiamond <<<grid, block,
                 sizeof(double) * sharedFloatsPerBlock>>>(
@@ -621,9 +705,9 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
                         x0Gpu, xLeftGpu, xRightGpu,
                         rhsGpu, leftMatrixGpu, centerMatrixGpu,
                         rightMatrixGpu, nGrids, method); 
-
-    double * solution = new double[nGrids];
-    cudaMemcpy(solution, x0Gpu, sizeof(double) * nGrids,
+*/
+    double * solution = new double[nDofs];
+    cudaMemcpy(solution, x0Gpu, sizeof(double) * nDofs,
             cudaMemcpyDeviceToHost);
 
     cudaFree(x0Gpu);
@@ -636,7 +720,7 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
 
     return solution;
 }
-*/
+
 int main(int argc, char *argv[])
 {
     // Ask user for inputs
@@ -662,7 +746,7 @@ int main(int argc, char *argv[])
     double dy = 1.0f / (nyGrids + 1);
 
     for (int iGrid = 0; iGrid < nDofs; ++iGrid) {
-        initX[iGrid] = 1.0f; 
+        initX[iGrid] = (double)iGrid; 
         rhs[iGrid] = 1.0f;
         leftMatrix[iGrid] = -1.0f / (dx * dx);
         centerMatrix[iGrid] = 2.0f / (dx * dx) + 2.0f / (dy * dy);
@@ -693,7 +777,7 @@ int main(int argc, char *argv[])
     cudaEventElapsedTime(&timeClassic, startClassic, stopClassic);
 
     // Run the Swept GPU Implementation and measure the time required
-    /*cudaEvent_t startSwept, stopSwept;
+    cudaEvent_t startSwept, stopSwept;
     float timeSwept;
     cudaEventCreate( &startSwept );
     cudaEventCreate( &stopSwept );
@@ -703,7 +787,7 @@ int main(int argc, char *argv[])
     cudaEventRecord(stopSwept, 0);
     cudaEventSynchronize(stopSwept);
     cudaEventElapsedTime(&timeSwept, startSwept, stopSwept);
-    */
+    
     // Print parameters of the problem to screen
     printf("===============INFORMATION============================\n");
     printf("Number of total grid points: %d\n", nDofs);
@@ -716,9 +800,9 @@ int main(int argc, char *argv[])
 
     // Print out results to the screen, notify if any GPU Classic or Swept values differ significantly
     for (int iGrid = 0; iGrid < nDofs; ++iGrid) {
-        printf("%d %f %f \n",iGrid, solutionCpu[iGrid],
-                             solutionGpuClassic[iGrid]);
-                         //    solutionGpuSwept[iGrid]); 
+        printf("%d %f %f %f \n",iGrid, solutionCpu[iGrid],
+                             solutionGpuClassic[iGrid],
+                             solutionGpuSwept[iGrid]); 
 	//assert(solutionGpuClassic[iGrid] == solutionGpuSwept[iGrid]);
 	// if (abs(solutionGpuClassic[iGrid] - solutionGpuSwept[iGrid]) > 1e-2) {
 	//    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
@@ -754,7 +838,7 @@ int main(int argc, char *argv[])
 
     // Free memory
     cudaEventDestroy(startClassic);
-//    cudaEventDestroy(startSwept);
+    cudaEventDestroy(startSwept);
     delete[] initX;
     delete[] rhs;
     delete[] leftMatrix;
