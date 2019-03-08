@@ -70,11 +70,14 @@ int main()
     cudaMalloc(&xTopGpu, sizeof(double) * numBridgeElemTotal);
     cudaMalloc(&xBottomGpu, sizeof(double) * numBridgeElemTotal);
     
+    // PRINT TO SCREEN
+    std::cout << "\n" << "NOW APPLYING FIRST UPDATE" << "\n" << std::endl;
+    
     // APPLY METHOD TO ADVANCE POINTS (NO SHIFT)
     _iterativeGpuOriginal <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, x0Gpu, notUsed,
 		   						 notUsed, notUsed, notUsed, notUsed, notUsed, nxGrids, nyGrids, notUsedInt);
 
-    // COPY TO CPU 
+/*    // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
@@ -83,15 +86,13 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << " xTop " << xTopCpu[iGrid] << "xBottom " << xBottomCpu[iGrid]  << std::endl;
     }
-
-    // PRINT TO SCREEN
-    std::cout << "\n" << "NOW APPLYING PURELY HORIZONTAL SHIFT METHOD" << "\n" << std::endl;
+*/
 
     // APPLY HORIZONTAL SHIFT
     _iterativeGpuHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, notUsed,
 		   						 notUsed, notUsed, notUsed, notUsed, notUsed, nxGrids, nyGrids, notUsedInt);
    
-    // COPY TO CPU 
+/*    // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xTopCpu, xTopGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -102,6 +103,7 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
+*/
 
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING VERTICAL AND HORIZONTAL SHIFT METHOD" << "\n" << std::endl;
@@ -110,7 +112,7 @@ int main()
     _iterativeGpuVerticalandHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, notUsed,
 		   						 notUsed, notUsed, notUsed, notUsed, notUsed, nxGrids, nyGrids, notUsedInt);
    
-    // COPY TO CPU 
+/*    // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xTopCpu, xTopGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -121,14 +123,14 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-
+*/
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING PURELY VERTICAL SHIFT METHOD" << "\n" << std::endl;
 
     // APPLY VERTICAL SHIFT
     _iterativeGpuVerticalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, notUsed,
 		   						 notUsed, notUsed, notUsed, notUsed, notUsed, nxGrids, nyGrids, notUsedInt);
-   
+/*   
     // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -140,7 +142,7 @@ int main()
     {
         std::cout << "Grid Point " << iGrid <<  " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-    
+*/    
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING FINAL METHOD" << "\n" << std::endl;
 
@@ -155,6 +157,7 @@ int main()
     {
         std::cout << "Grid Point " << iGrid <<  " x0Cpu " << x0Cpu[iGrid]  << std::endl;
     }
+
 
     // CLEAN UP
     cudaFree(xLeftGpu);
