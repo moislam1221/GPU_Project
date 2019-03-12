@@ -7,7 +7,31 @@ __device__
 double jacobi(const double leftMatrix, const double centerMatrix, const double rightMatrix, const double topMatrix, const double bottomMatrix,
               const double leftX, const double centerX, const double rightX, const double topX, const double bottomX,
               const double centerRhs) {
-    return (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX));
+    return (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
+}
+
+double normFromRow(double leftMatrix, double centerMatrix, double rightMatrix, double topMatrix, double bottomMatrix, double leftX, double centerX, double rightX,  double topX, double bottomX, double centerRhs) 
+{
+    return centerRhs - (leftMatrix*leftX + centerMatrix*centerX + rightMatrix*rightX + topMatrix*topX + bottomMatrix*bottomX);
+}
+
+double Residual(const double * solution, const double * rhs, const double * leftMatrix, const double * centerMatrix, const double * rightMatrix, const double * topMatrix, const double * bottomMatrix, int nxGrids, int nyGrids)
+{
+    int nDofs = nxGrids * nyGrids;
+    double residual = 0.0;  
+
+    for (int iGrid = 0; iGrid < nDofs; iGrid++) {
+        double leftX = ((iGrid % nxGrids) == 0) ? 0.0 : solution[iGrid-1];
+        double centerX = solution[iGrid];
+        double rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : solution[iGrid+1];
+        double topX = (iGrid < nxGrids * (nyGrids - 1)) ? solution[iGrid + nxGrids] : 0.0;
+        double bottomX = (iGrid >= nxGrids) ?  solution[iGrid-nxGrids] : 0.0;
+        double residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], topMatrix[iGrid], bottomMatrix[iGrid], leftX, centerX, rightX, topX, bottomX, rhs[iGrid]);
+	residual = residual + residualContributionFromRow * residualContributionFromRow;
+	printf("For gridpoint %d, residual contribution is %f\n", iGrid, residualContributionFromRow);
+    }
+    residual = sqrt(residual);
+    return residual;
 }
 
 __device__
@@ -25,11 +49,26 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
     if ((threadIdx.x >= 1 && threadIdx.x <= blockDim.x-2) && (threadIdx.y >= 1 && threadIdx.y <= blockDim.y-2)) {
         for (int k = 0; k < maxSteps; k++) {
             // Define necessary constants
+            double centerRhs = rhsBlock[idx];
+            double leftMatrix = leftMatrixBlock[idx];
+            double centerMatrix = centerMatrixBlock[idx];
+            double rightMatrix = rightMatrixBlock[idx];
+            double topMatrix = topMatrixBlock[idx];
+            double bottomMatrix = bottomMatrixBlock[idx];
+            double leftX = ((iGrid % nxGrids) == 0) ? 0.0 : x0[idx-1];
             double centerX = x0[idx];
+            double rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : x0[idx+1];
+            double topX = (iGrid < nxGrids * (nyGrids - 1)) ? x0[idx+blockDim.x] : 0.0;
+            double bottomX = (iGrid >= nxGrids) ?  x0[idx-blockDim.x] : 0.0;
+           
+            //printf("In iGrid %d, idx = %d, left %f, right %f, center %f, top %f, bottom %f\n", iGrid, idx, leftX, rightX, centerX, topX, bottomX	);
 	    // Perform update
-	    x1[idx] = increment(centerX);
+	    //x1[idx] = increment(centerX);
+            x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                             leftX, centerX, rightX, topX, bottomX, centerRhs);
             // Synchronize
 	    __syncthreads();
+            printf("Updated value in idx = %d is %f\n", idx, x1[idx]);
 	    double * tmp; tmp = x0; x0 = x1;
 	}
     }
@@ -56,11 +95,24 @@ void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBloc
     if ((threadIdx.x >= 1 && threadIdx.x <= blockDim.x-2) && (threadIdx.y >= 1 && threadIdx.y <= blockDim.y-2)) {
         for (int k = 0; k < maxSteps; k++) {
             // Define necessary constants
+            double centerRhs = rhsBlock[idx];
+            double leftMatrix = leftMatrixBlock[idx];
+            double centerMatrix = centerMatrixBlock[idx];
+            double rightMatrix = rightMatrixBlock[idx];
+            double topMatrix = topMatrixBlock[idx];
+            double bottomMatrix = bottomMatrixBlock[idx];
+            double leftX = ((iGrid % nxGrids) == 0) ? 0.0 : x0[idx-1];
             double centerX = x0[idx];
-	    // Perform update
-	    x1[idx] = increment(centerX);
+            double rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : x0[idx+1];
+            double topX = (iGrid < nxGrids * (nyGrids - 1)) ? x0[idx+blockDim.x] : 0.0;
+            double bottomX = (iGrid >= nxGrids) ?  x0[idx-blockDim.x] : 0.0;
+            // Perform update
+	    //x1[idx] = increment(centerX);
+            x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                             leftX, centerX, rightX, topX, bottomX, centerRhs); 
             // Synchronize
 	    __syncthreads();
+            printf("In blockIdx %d, blockIdy %d, iGrid %d, Updated value in idx = %d is %f\n", blockIdx.x, blockIdx.y, iGrid, idx, x1[idx]);
 	    double * tmp; tmp = x0; x0 = x1;
 	}
     }
@@ -103,7 +155,7 @@ void _iterativeGpuOriginal(double * xLeftGpu, double *xRightGpu,
     sharedMemory[threadIdx.x + threadIdx.y * blockDim.x] = x0Block[threadIdx.x + threadIdx.y * nxGrids];
 
     sharedMemory[threadIdx.x + threadIdx.y * blockDim.x + blockDim.x * blockDim.y] = x0Block[threadIdx.x + threadIdx.y * nxGrids];
-    
+   
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
 			   nxGrids, nyGrids, iGrid, method);
@@ -120,12 +172,12 @@ void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double *
     int blockShift = xShift + yShift * nxGrids;
     int horizontalShift = blockDim.x/2;
 
-    const double * rhsBlock = rhsGpu + blockShift + horizontalShift;
-    const double * leftMatrixBlock = leftMatrixGpu + blockShift + horizontalShift;
-    const double * centerMatrixBlock = centerMatrixGpu + blockShift + horizontalShift;
-    const double * rightMatrixBlock = rightMatrixGpu + blockShift + horizontalShift;
-    const double * topMatrixBlock = topMatrixGpu + blockShift + horizontalShift;
-    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift + horizontalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ horizontalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ horizontalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ horizontalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ horizontalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ horizontalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ horizontalShift;
 
     int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -139,8 +191,13 @@ void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double *
     double * xTopBlock = xTopGpu + arrayShift;
 
     int idx = threadIdx.x + threadIdx.y * nxGrids;
-    int iGrid = blockShift + idx;
-
+    int iGrid = blockShift + idx + horizontalShift;
+   
+    if ((blockIdx.x == gridDim.x-1) && threadIdx.x >= (blockDim.x/2)) {
+        iGrid = iGrid - nxGrids;
+    }
+    
+    // printf("In loop: I am idx %d and grid point %d\n", idx, iGrid);
     extern __shared__ double sharedMemory[];
     idx = threadIdx.x + threadIdx.y * blockDim.x;
 
@@ -165,14 +222,15 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
     int xShift = blockDim.x * blockIdx.x;
     int yShift = blockDim.y * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
+    int horizontalShift = blockDim.x/2;
     int verticalShift = blockDim.y/2 * nxGrids;
 
-    const double * rhsBlock = rhsGpu + blockShift + verticalShift;
-    const double * leftMatrixBlock = leftMatrixGpu + blockShift + verticalShift;
-    const double * centerMatrixBlock = centerMatrixGpu + blockShift + verticalShift;
-    const double * rightMatrixBlock = rightMatrixGpu + blockShift + verticalShift;
-    const double * topMatrixBlock = topMatrixGpu + blockShift + verticalShift;
-    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift + verticalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -186,7 +244,24 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
     double * xRightBlock = xRightGpu + arrayShift;
 
     int idx = threadIdx.x + threadIdx.y * nxGrids;
-    int iGrid = blockShift + idx;
+    int iGrid = blockShift + verticalShift + horizontalShift + idx;
+
+    if ((blockIdx.x == gridDim.x-1) && threadIdx.x >= (blockDim.x/2)) {
+        iGrid = iGrid - nxGrids;
+    }
+
+    int nDofs = nxGrids * nyGrids;
+
+    if ((blockIdx.y == gridDim.y-1) && threadIdx.y >= (blockDim.y/2)) {
+        iGrid = iGrid - nDofs;
+    } 
+
+/*
+    if ((blockIdx.x == gridDim.x-1) && (threadIdx.x >= (blockDim.x/2)) && (iGrid >= nDofs-1)) {
+        iGrid = blockShift + verticalShift + horizontalShift + idx - nDofs - nxGrids; 
+    }
+*/   
+    // printf("I am idx %d with tidx %d and tidy %d and grid point %d\n", idx, threadIdx.x, threadIdx.y, iGrid);
 
     extern __shared__ double sharedMemory[];
     idx = threadIdx.x + threadIdx.y * blockDim.x;
@@ -215,12 +290,12 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
     int blockShift = xShift + yShift * nxGrids;
     int verticalShift = blockDim.y/2 * nxGrids;
 
-    const double * rhsBlock = rhsGpu + blockShift + verticalShift;
-    const double * leftMatrixBlock = leftMatrixGpu + blockShift + verticalShift;
-    const double * centerMatrixBlock = centerMatrixGpu + blockShift + verticalShift;
-    const double * rightMatrixBlock = rightMatrixGpu + blockShift + verticalShift;
-    const double * topMatrixBlock = topMatrixGpu + blockShift + verticalShift;
-    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift + verticalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -235,8 +310,12 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
     double * xTopBlock = xTopGpu + arrayShift;
 
     int idx = threadIdx.x + threadIdx.y * nxGrids;
-    int iGrid = blockShift + idx;
+    int nDofs = nxGrids * nyGrids;
+    int iGrid = blockShift + verticalShift + threadIdx.y * nxGrids + threadIdx.x;
+    iGrid = (iGrid >= nDofs) ? iGrid - nDofs : iGrid;
 
+    // printf("In loop: I am idx %d and grid point %d\n", idx, iGrid);
+    
     extern __shared__ double sharedMemory[];
     idx = threadIdx.x + threadIdx.y * blockDim.x;
 
