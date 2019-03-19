@@ -63,7 +63,7 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
            
             //printf("In iGrid %d, idx = %d, left %f, right %f, center %f, top %f, bottom %f\n", iGrid, idx, leftX, rightX, centerX, topX, bottomX	);
 	    // Perform update
-	    //x1[idx] = increment(centerX);
+   	    //x1[idx] = increment(centerX);
             x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                              leftX, centerX, rightX, topX, bottomX, centerRhs);
             // Synchronize
@@ -353,10 +353,16 @@ void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int n
     int idx = threadIdx.x + threadIdx.y * blockDim.x;
 
     if (idx < (blockDim.x * blockDim.y)/2) {
+//        printf("The %dth entry of xTopBlock is %f\n", idx, xTopBlock[idx]);
+//        printf("xTopBlock[idx=%d] goes into sharedMemory[%d]\n", idx, idx+numElementsPerBlock);
         sharedMemory[idx + numElementsPerBlock] = xTopBlock[idx]; 
 	sharedMemory[threadIdx.x + (blockDim.x)*(blockDim.x/2-1-threadIdx.y)] = xBottomBlock[idx];
     }
 
+    __syncthreads();
+
+//    printf("sharedMemory[idx=%d] is %f \n", idx, sharedMemory[idx]);
+    
     double * x0 = x0Gpu + blockShift;
 
     idx = threadIdx.x + threadIdx.y * nxGrids;
