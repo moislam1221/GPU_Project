@@ -17,12 +17,17 @@
 
 #include "original.h"
 
-int main()
+int main(int argc, char *argv[])
 {
     // INPUTS
-    int nxGrids = 8;
+    const int nxGrids = atoi(argv[1]);
+    const int nyGrids = atoi(argv[1]);
+    const int threadsPerBlock = atoi(argv[2]);
+    const int numIterations = atoi(argv[3]);
+ 
+/*  int nxGrids = 8;
     int nyGrids = 8;
-    int threadsPerBlock = 8;
+    int threadsPerBlock = 8; */
    
     // SETTING GRID, BLOCK, THREAD INFORMATION 
     int nxBlocks = nxGrids / threadsPerBlock;
@@ -105,8 +110,6 @@ int main()
     cudaMemcpy(rightMatrixGpu, rightMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
     cudaMemcpy(bottomMatrixGpu, bottomMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
     cudaMemcpy(topMatrixGpu, topMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
-
-    int numIterations = 10000;
 
     for (int i = 0; i < numIterations; i++) {
     
