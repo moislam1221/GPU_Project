@@ -80,7 +80,6 @@ double Residual(const double * solution, const double * rhs, const double * left
         double bottomX = (iGrid >= nxGrids) ?  solution[iGrid-nxGrids] : 0.0;
         double residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], topMatrix[iGrid], bottomMatrix[iGrid], leftX, centerX, rightX, topX, bottomX, rhs[iGrid]);
 	residual = residual + residualContributionFromRow * residualContributionFromRow;
-//	printf("For gridpoint %d, residual contribution is %f\n", iGrid, residualContributionFromRow);
     }
     residual = sqrt(residual);
     return residual;
@@ -223,13 +222,12 @@ double * iterativeGpuClassic(const double * initX, const double * rhs,
 __device__
 void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock, const double *rhsBlock, 
                              const double * leftMatrixBlock, const double *centerMatrixBlock, const double * rightMatrixBlock, 
-			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method)
+			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, int maxSteps)
 {
     extern __shared__ double sharedMemory[];
     double * x0 = sharedMemory; 
     int elemPerBlock = blockDim.x * blockDim.y;
     double * x1 = sharedMemory + elemPerBlock;
-    int maxSteps = 100;
     int idx = threadIdx.x + threadIdx.y * blockDim.x;
 
     if ((threadIdx.x >= 1 && threadIdx.x <= blockDim.x-2) && (threadIdx.y >= 1 && threadIdx.y <= blockDim.y-2)) {
@@ -249,12 +247,10 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
            
             //printf("In iGrid %d, idx = %d, left %f, right %f, center %f, top %f, bottom %f\n", iGrid, idx, leftX, rightX, centerX, topX, bottomX	);
 	    // Perform update
-   	    //x1[idx] = increment(centerX);
             x1[idx] = iterativeOperation(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                              leftX, centerX, rightX, topX, bottomX, centerRhs, iGrid, method);
             // Synchronize
 	    __syncthreads();
-            printf("Updated value in idx = %d is %f\n", idx, x1[idx]);
 	    double * tmp; tmp = x0; x0 = x1;
 	}
     }
@@ -264,18 +260,20 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
         xLeftBlock[idx] = x0[threadIdx.x * blockDim.x + threadIdx.y];
 	xRightBlock[idx] = x0[(blockDim.x-1-threadIdx.y) + threadIdx.x * blockDim.x];
     }
+
+    __syncthreads();
+
 }
 
 __device__
 void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBlock, const double *rhsBlock, 
                              const double * leftMatrixBlock, const double *centerMatrixBlock, const double * rightMatrixBlock, 
-			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method)
+			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, int maxSteps)
 {
     extern __shared__ double sharedMemory[];
     double * x0 = sharedMemory; 
     int elemPerBlock = blockDim.x * blockDim.y;
     double * x1 = sharedMemory + elemPerBlock;
-    int maxSteps = 100;
     int idx = threadIdx.x + threadIdx.y * blockDim.x;
 
     if ((threadIdx.x >= 1 && threadIdx.x <= blockDim.x-2) && (threadIdx.y >= 1 && threadIdx.y <= blockDim.y-2)) {
@@ -293,12 +291,10 @@ void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBloc
             double topX = (iGrid < nxGrids * (nyGrids - 1)) ? x0[idx+blockDim.x] : 0.0;
             double bottomX = (iGrid >= nxGrids) ?  x0[idx-blockDim.x] : 0.0;
             // Perform update
-	    //x1[idx] = increment(centerX);
             x1[idx] = iterativeOperation(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                              leftX, centerX, rightX, topX, bottomX, centerRhs, iGrid, method); 
             // Synchronize
 	    __syncthreads();
-            printf("In blockIdx %d, blockIdy %d, iGrid %d, Updated value in idx = %d is %f\n", blockIdx.x, blockIdx.y, iGrid, idx, x1[idx]);
 	    double * tmp; tmp = x0; x0 = x1;
 	}
     }
@@ -308,13 +304,15 @@ void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBloc
         xBottomBlock[idx] = x0[idx];
 	xTopBlock[idx] = x0[threadIdx.x + (blockDim.x)*(blockDim.x-1-threadIdx.y)];
     }
+
+    __syncthreads();
 }
 
 __global__
 void _iterativeGpuOriginal(double * xLeftGpu, double *xRightGpu,
                              const double * x0Gpu, const double *rhsGpu, 
                              const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
-			     const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method)
+			     const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int maxSteps)
 {
 
     int xShift = blockDim.x * blockIdx.x;
@@ -342,16 +340,18 @@ void _iterativeGpuOriginal(double * xLeftGpu, double *xRightGpu,
 
     sharedMemory[threadIdx.x + threadIdx.y * blockDim.x + blockDim.x * blockDim.y] = x0Block[threadIdx.x + threadIdx.y * nxGrids];
    
+    __syncthreads();
+ 
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method);
+			   nxGrids, nyGrids, iGrid, method, maxSteps);
 }
 
 __global__
 void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                                   const double *rhsGpu, const double * leftMatrixGpu, const double *centerMatrixGpu, 
                                   const double * rightMatrixGpu, const double * topMatrixGpu, const double * bottomMatrixGpu, 
-                                  int nxGrids, int nyGrids, int method)
+                                  int nxGrids, int nyGrids, int method, int maxSteps)
 {
     int xShift = blockDim.x * blockIdx.x;
     int yShift = blockDim.y * blockIdx.y;
@@ -394,16 +394,18 @@ void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double *
         sharedMemory[idx] = xRightBlock[threadIdx.y + (threadIdx.x-(blockDim.x/2))*blockDim.y];
     }
     
+    __syncthreads();
+
     __iterativeBlockUpdateToNorthSouth(xTopBlock, xBottomBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method);
+			   nxGrids, nyGrids, iGrid, method, maxSteps);
 }
 
 __global__
 void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                                 const double *rhsGpu, const double * leftMatrixGpu, const double *centerMatrixGpu, 
                                 const double * rightMatrixGpu, const double * topMatrixGpu, const double * bottomMatrixGpu, 
-                                int nxGrids, int nyGrids, int method)
+                                int nxGrids, int nyGrids, int method, int maxSteps)
 {
     int xShift = blockDim.x * blockIdx.x;
     int yShift = blockDim.y * blockIdx.y;
@@ -442,13 +444,6 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
         iGrid = iGrid - nDofs;
     } 
 
-/*
-    if ((blockIdx.x == gridDim.x-1) && (threadIdx.x >= (blockDim.x/2)) && (iGrid >= nDofs-1)) {
-        iGrid = blockShift + verticalShift + horizontalShift + idx - nDofs - nxGrids; 
-    }
-*/   
-    // printf("I am idx %d with tidx %d and tidy %d and grid point %d\n", idx, threadIdx.x, threadIdx.y, iGrid);
-
     extern __shared__ double sharedMemory[];
     idx = threadIdx.x + threadIdx.y * blockDim.x;
 
@@ -458,10 +453,12 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
     else {
         sharedMemory[idx] = xTopBlock[threadIdx.x + (threadIdx.y-(blockDim.y/2))*blockDim.x];
     }
+
+    __syncthreads();
     
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method);
+			   nxGrids, nyGrids, iGrid, method, maxSteps);
 }
 
 
@@ -469,7 +466,7 @@ __global__
 void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                                 const double *rhsGpu, const double * leftMatrixGpu, const double *centerMatrixGpu, 
                                 const double * rightMatrixGpu, const double * topMatrixGpu, const double * bottomMatrixGpu, 
-                                int nxGrids, int nyGrids, int method)
+                                int nxGrids, int nyGrids, int method, int maxSteps)
 {
     int xShift = blockDim.x * blockIdx.x;
     int yShift = blockDim.y * blockIdx.y;
@@ -500,8 +497,6 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
     int iGrid = blockShift + verticalShift + threadIdx.y * nxGrids + threadIdx.x;
     iGrid = (iGrid >= nDofs) ? iGrid - nDofs : iGrid;
 
-    // printf("In loop: I am idx %d and grid point %d\n", idx, iGrid);
-    
     extern __shared__ double sharedMemory[];
     idx = threadIdx.x + threadIdx.y * blockDim.x;
 
@@ -512,9 +507,11 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
         sharedMemory[idx] = xRightBlock[threadIdx.y + (threadIdx.x-(blockDim.x/2))*blockDim.y];
     }
 
+    __syncthreads();
+
     __iterativeBlockUpdateToNorthSouth( xTopBlock, xBottomBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method);
+			   nxGrids, nyGrids, iGrid, method, maxSteps);
 }
 
 __global__
@@ -539,16 +536,12 @@ void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int n
     int idx = threadIdx.x + threadIdx.y * blockDim.x;
 
     if (idx < (blockDim.x * blockDim.y)/2) {
-//        printf("The %dth entry of xTopBlock is %f\n", idx, xTopBlock[idx]);
-//        printf("xTopBlock[idx=%d] goes into sharedMemory[%d]\n", idx, idx+numElementsPerBlock);
         sharedMemory[idx + numElementsPerBlock] = xTopBlock[idx]; 
 	sharedMemory[threadIdx.x + (blockDim.x)*(blockDim.x/2-1-threadIdx.y)] = xBottomBlock[idx];
     }
 
     __syncthreads();
 
-//    printf("sharedMemory[idx=%d] is %f \n", idx, sharedMemory[idx]);
-    
     double * x0 = x0Gpu + blockShift;
 
     idx = threadIdx.x + threadIdx.y * nxGrids;
@@ -560,7 +553,7 @@ void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int n
 double * iterativeGpuSwept(const double * initX, const double * rhs,
         const double * leftMatrix, const double * centerMatrix,
         const double * rightMatrix, const double * topMatrix, const double * bottomMatrix,
-	int nxGrids, int nyGrids, int nIters, const int threadsPerBlock, const int method)
+	int nxGrids, int nyGrids, int nIters, int maxSteps, const int threadsPerBlock, const int method)
 {     
     // Determine number of threads and blocks 
     const int nxBlocks = (int)ceil(nxGrids / (double)threadsPerBlock);
@@ -605,16 +598,16 @@ double * iterativeGpuSwept(const double * initX, const double * rhs,
     for (int i = 0; i < nIters; i++) {
 
         // APPLY METHOD TO ADVANCE POINTS (NO SHIFT)
-        _iterativeGpuOriginal <<<grid, block, sharedBytes>>>(xLeftGpu, xRightGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method);
+        _iterativeGpuOriginal <<<grid, block, sharedBytes>>>(xLeftGpu, xRightGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method, maxSteps);
 
         // APPLY HORIZONTAL SHIFT
-        _iterativeGpuHorizontalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method);
+        _iterativeGpuHorizontalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method, maxSteps);
 
         // APPLY VERTICAL SHIFT (ALONG WITH PREVIOUS HORIZONTAL SHIFT)
-        _iterativeGpuVerticalandHorizontalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method);
+        _iterativeGpuVerticalandHorizontalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method, maxSteps);
 
         // APPLY VERTICAL SHIFT
-        _iterativeGpuVerticalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method);
+        _iterativeGpuVerticalShift <<<grid, block, sharedBytes>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, method, maxSteps);
 
         // APPLY FINAL STEP
         _finalSolution <<<grid, block, sharedBytes>>>(xTopGpu, xBottomGpu, x0Gpu, nxGrids);
@@ -644,6 +637,7 @@ int main(int argc, char *argv[])
     const int threadsPerBlock = atoi(argv[2]); 
     const int nIters = atoi(argv[3]);
     const int nCycles = atoi(argv[4]);
+    const int maxSteps = atoi(argv[5]);
 
     method_type method = JACOBI;
 
@@ -671,8 +665,6 @@ int main(int argc, char *argv[])
 	topMatrix[iGrid] = -1.0f / (dy * dy);
     }
 
-    // cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
-
     // Run the CPU Implementation and measure the time required
     clock_t cpuStartTime = clock();
     double * solutionCpu = iterativeCpu(initX, rhs, leftMatrix, centerMatrix,
@@ -699,7 +691,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &stopSwept );
     cudaEventRecord( startSwept, 0);
     double * solutionGpuSwept = iterativeGpuSwept(initX, rhs, leftMatrix, centerMatrix,
-                                                  rightMatrix, topMatrix, bottomMatrix, nxGrids, nyGrids, nCycles, threadsPerBlock, method);
+                                                  rightMatrix, topMatrix, bottomMatrix, nxGrids, nyGrids, nCycles, maxSteps, threadsPerBlock, method);
     cudaEventRecord(stopSwept, 0);
     cudaEventSynchronize(stopSwept);
     cudaEventElapsedTime(&timeSwept, startSwept, stopSwept);
