@@ -47,7 +47,7 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
     int maxSteps = 1;
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
-
+   
     for (int k = 0; k < maxSteps; k++) {
         for (int idx = index; idx < elemPerBlock; idx += stride) {
            if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-(subdomainLength-1))) {
@@ -69,7 +69,6 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
                 double rightX = x0[idx+1];
                 double topX = x0[idx+blockDim.x];
                 double bottomX = x0[idx-blockDim.x];
-               
                 //printf("In iGrid %d, idx = %d, left %f, right %f, center %f, top %f, bottom %f\n", iGrid, idx, leftX, rightX, centerX, topX, bottomX	);
 	        // Perform updatE
    	        x1[idx] = increment(centerX);
@@ -77,7 +76,6 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
                 //                 leftX, centerX, rightX, topX, bottomX, centerRhs);
                 // Synchronize
 	        __syncthreads();
-                printf("My idx is %d\n", idx);
                 
 //                double * tmp; tmp = x0; x0 = x1;
 //              printf("Updated value in idx = %d is %f\n", idx, x1[idx]);
@@ -86,9 +84,17 @@ void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock
                 double * tmp; tmp = x0; x0 = x1;
     }
 
+    index = threadIdx.x + threadIdx.y * blockDim.x;
+    stride = blockDim.x * blockDim.y;
+    for (int idx = index; idx < elemPerBlock; idx += stride) {
+        //printf("BlockIdx %d, BlockIdy %d: The value of x0[idx=%d] is %f\n", blockIdx.x, blockIdx.y, idx, x0[idx]);
+    }
+
+    //printf("Hello\n"); 
     for (int idx = index; idx < elemPerBlock/2; idx += stride) {
         xLeftBlock[idx] = x0[subdomainLength * (idx % subdomainLength) + (idx/subdomainLength)];
         xRightBlock[idx] = x0[subdomainLength * (idx % subdomainLength) - (idx/subdomainLength) + (subdomainLength-1)];
+        //printf("In blockIdx %d, blockIdy %d, xLeftBlock[idx=%d] = %f\n", blockIdx.x, blockIdx.y, idx, xLeftBlock[idx]);
     }
 
     // Save xLeft, xRight, xTop, xBottom
@@ -112,14 +118,14 @@ void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBloc
     int stride = blockDim.x * blockDim.y;
 
     for (int idx = index; idx < elemPerBlock; idx += stride) {
-        printf("NorthToSouth: For blockIdx.x %d and blockIdx.y %d, the %dth entry of x0 is %f\n", blockIdx.x, blockIdx.y,  idx, x0[idx]);
+        //printf("NorthToSouth: For blockIdx.x %d and blockIdx.y %d, the %dth entry of x0 is %f\n", blockIdx.x, blockIdx.y,  idx, x0[idx]);
         __syncthreads();
     }
     
     for (int k = 0; k < maxSteps; k++) {
         for (int idx = index; idx < elemPerBlock; idx += stride) {
             __syncthreads();
-            printf("In the loop: For blockIdx.x %d and blockIdx.y %d, the %dth entry of x0 is %f\n", blockIdx.x, blockIdx.y,  idx, x0[idx]);
+            //printf("In the loop: For blockIdx.x %d and blockIdx.y %d, the %dth entry of x0 is %f\n", blockIdx.x, blockIdx.y,  idx, x0[idx]);
             if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-subdomainLength-1)) {
                 // Define necessary constants
                 double centerRhs = rhsBlock[idx];
@@ -133,16 +139,16 @@ void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBloc
                 double rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : x0[idx+1];
                 double topX = (iGrid < nxGrids * (nyGrids - 1)) ? x0[idx+blockDim.x] : 0.0;
                 double bottomX = (iGrid >= nxGrids) ?  x0[idx-blockDim.x] : 0.0; */
-                printf("idx is %d\n", idx);
+                //printf("idx is %d\n", idx);
                 double leftX = x0[idx-1];
                 double centerX = x0[idx];
                 double rightX = x0[idx+1];
                 double topX = x0[idx+blockDim.x];
                 double bottomX = x0[idx-blockDim.x];
                 // Perform update
-                printf("x1[%d] before incrementing is %f and centerX is %f\n", idx, x1[idx], centerX);
+                //printf("x1[%d] before incrementing is %f and centerX is %f\n", idx, x1[idx], centerX);
      	        x1[idx] = increment(centerX);
-                printf("x1[%d] is now %f\n", idx, x1[idx]);
+                //printf("x1[%d] is now %f\n", idx, x1[idx]);
                 //x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                 //                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 // Synchronize
@@ -283,14 +289,14 @@ void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double *
             sharedMemory[idx] = xLeftBlock[Idx];
             sharedMemory[idx + subdomainLength * subdomainLength] = xLeftBlock[Idx];
 //            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
-            printf("From left - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+            // printf("From left - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
         }
         else {
             int Idx = ((idx % subdomainLength) - (subdomainLength-1)/2 - 1) * subdomainLength + idx/subdomainLength;
             sharedMemory[idx] = xRightBlock[Idx];
             sharedMemory[idx + subdomainLength * subdomainLength] = xRightBlock[Idx];
 //            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
-            printf("From right - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+            // printf("From right - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
         }
     }
 
@@ -311,12 +317,13 @@ __global__
 void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                                 const double * x0Gpu, const double *rhsGpu, 
                                 const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
-			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method)
+			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
-    int xShift = blockDim.x * blockIdx.x;
-    int yShift = blockDim.y * blockIdx.y;
+    int xShift = subdomainLength * blockIdx.x;
+    int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
-    int horizontalShift = blockDim.x/2;
+    
+    int horizontalShift = subdomainLength/2;
     int verticalShift = blockDim.y/2 * nxGrids;
 
     const double * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
@@ -326,18 +333,29 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
     const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
     const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
-    int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
+    int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
     double * xBottomBlock = xTopGpu + arrayShift;
     double * xTopBlock = (blockIdx.y != gridDim.y-1) ?
-                         xBottomGpu + arrayShift + numElementsPerBlock * gridDim.x :
+                         xBottomGpu + numElementsPerBlock * gridDim.x + arrayShift :
 			 xBottomGpu + (numElementsPerBlock * blockIdx.x);
+    int index3 = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride3 = blockDim.x * blockDim.y;
+    for (int idx = index3; idx < subdomainLength * subdomainLength * 2; idx += stride3) {
+        // printf("In blockIdx %d, blockIdy %d, xBottomGpu[idx=%d] = %f\n", blockIdx.x, blockIdx.y, idx, xBottomGpu[idx]);
+    }
+
+    int index2 = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride2 = blockDim.x * blockDim.y;
+    for (int idx = index2; idx < subdomainLength * subdomainLength *2; idx += stride2) {
+       // printf("In blockIdx %d, blockIdy %d, xTopBlock[idx=%d] = %f\n", blockIdx.x, blockIdx.y, idx, xTopBlock[idx]);
+    }
     
     double * xLeftBlock = xLeftGpu + arrayShift;
     double * xRightBlock = xRightGpu + arrayShift;
 
-    int idx = threadIdx.x + threadIdx.y * nxGrids;
+/*    int idx = threadIdx.x + threadIdx.y * nxGrids;
     int iGrid = blockShift + verticalShift + horizontalShift + idx;
 
     if ((blockIdx.x == gridDim.x-1) && threadIdx.x >= (blockDim.x/2)) {
@@ -348,8 +366,8 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
 
     if ((blockIdx.y == gridDim.y-1) && threadIdx.y >= (blockDim.y/2)) {
         iGrid = iGrid - nDofs;
-    } 
-
+    } blockIdx.y
+*/
 /*
     if ((blockIdx.x == gridDim.x-1) && (threadIdx.x >= (blockDim.x/2)) && (iGrid >= nDofs-1)) {
         iGrid = blockShift + verticalShift + horizontalShift + idx - nDofs - nxGrids; 
@@ -358,18 +376,32 @@ void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGp
     // printf("I am idx %d with tidx %d and tidy %d and grid point %d\n", idx, threadIdx.x, threadIdx.y, iGrid);
 
     extern __shared__ double sharedMemory[];
-    idx = threadIdx.x + threadIdx.y * blockDim.x;
+    int index = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride = blockDim.x * blockDim.y;
 
-    if (idx < numElementsPerBlock) {
-        sharedMemory[idx] = xBottomBlock[threadIdx.x + (blockDim.y/2-1-threadIdx.y)*blockDim.x];
+    for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
+        if (idx < numElementsPerBlock) {
+            sharedMemory[idx] = xBottomBlock[(subdomainLength/2-1-idx/subdomainLength) * subdomainLength + idx % subdomainLength];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xBottomBlock[(subdomainLength/2-1-idx/subdomainLength) * subdomainLength + idx % subdomainLength];
+            //printf("In blockIdx.x %d and blockIdx.y %d: The %dth entry of sharedMemory is %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]);
+        }
+        else {
+            sharedMemory[idx] = xTopBlock[idx - numElementsPerBlock];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xTopBlock[idx - numElementsPerBlock];
+            //printf("In blockIdx.x %d and blockIdx.y %d: The %dth entry of sharedMemory is %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]);
+           //printf("In blockIdx.x %d, blockidx.y %d, in idx %d we obtain value of %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]); 
+        }
     }
-    else {
-        sharedMemory[idx] = xTopBlock[threadIdx.x + (threadIdx.y-(blockDim.y/2))*blockDim.x];
-    }
-    
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method, method);
+			   nxGrids, nyGrids, nyGrids, method, subdomainLength);
+/*    __syncthreads(); 
+    int index4 = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride4 = blockDim.x * blockDim.y;
+    for (int idx = index4; idx < subdomainLength * subdomainLength/2; idx += stride4) {
+        printf("In blockIdx %d, blockIdy %d, xLeftBlock[idx=%d] = %f\n", blockIdx.x, blockIdx.y, idx, xLeftBlock[idx]);
+        printf("In blockIdx %d, blockIdy %d, xRightBlock[idx=%d] = %f\n", blockIdx.x, blockIdx.y, idx, xRightBlock[idx]);
+    }*/
 }
 
 
@@ -377,10 +409,10 @@ __global__
 void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
                                 const double * x0Gpu, const double *rhsGpu, 
                                 const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
-			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method)
+			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
-    int xShift = blockDim.x * blockIdx.x;
-    int yShift = blockDim.y * blockIdx.y;
+    int xShift = subdomainLength * blockIdx.x;
+    int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
     int verticalShift = blockDim.y/2 * nxGrids;
 
@@ -391,7 +423,7 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
     const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
     const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
-    int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
+    int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
     
@@ -403,34 +435,83 @@ void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * x
     double * xBottomBlock = xBottomGpu + arrayShift;
     double * xTopBlock = xTopGpu + arrayShift;
 
-    int idx = threadIdx.x + threadIdx.y * nxGrids;
+/*    int idx = threadIdx.x + threadIdx.y * nxGrids;
     int nDofs = nxGrids * nyGrids;
     int iGrid = blockShift + verticalShift + threadIdx.y * nxGrids + threadIdx.x;
     iGrid = (iGrid >= nDofs) ? iGrid - nDofs : iGrid;
-
+*/
     // printf("In loop: I am idx %d and grid point %d\n", idx, iGrid);
-    
+/*    int index = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride = blockDim.x * blockDim.y;
+    int idx = index;
+    for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
+        if (idx % subdomainLength < subdomainLength/2) {
+            int Idx = ((subdomainLength-1)/2-(idx % subdomainLength)) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xLeftBlock[Idx];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xLeftBlock[Idx];
+//            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
+            printf("From left - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+        }
+        else {
+            int Idx = ((idx % subdomainLength) - (subdomainLength-1)/2 - 1) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xRightBlock[Idx];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xRightBlock[Idx];
+//            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
+            printf("From right - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+        }
+    }
+*/    
     extern __shared__ double sharedMemory[];
-    idx = threadIdx.x + threadIdx.y * blockDim.x;
+//    idx = threadIdx.x + threadIdx.y * blockDim.x;
 
-    if (threadIdx.x < blockDim.x/2) {
-        sharedMemory[idx] = xLeftBlock[threadIdx.y + (blockDim.x/2-1-threadIdx.x)*blockDim.y];
+    int index = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride = blockDim.x * blockDim.y;
+    int idx = index;
+    for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
+        if (idx % subdomainLength < subdomainLength/2) {
+            int Idx = ((subdomainLength-1)/2-(idx % subdomainLength)) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xLeftBlock[Idx];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xLeftBlock[Idx];
+//            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
+            // printf("From left - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+        }
+        else {
+            int Idx = ((idx % subdomainLength) - (subdomainLength-1)/2 - 1) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xRightBlock[Idx];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xRightBlock[Idx];
+//            printf("In blockID %d, the %dth entry of shared memory is %f\n", blockID, idx, sharedMemory[idx]);
+            // printf("From right - Block ID is %d: sharedMemory[idx=%d] is equal to %f\n", blockID, idx, sharedMemory[idx]);
+        }
     }
-    else {
-        sharedMemory[idx] = xRightBlock[threadIdx.y + (threadIdx.x-(blockDim.x/2))*blockDim.y];
-    }
+    
 
+/*    for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
+        printf("Block Idx.x %d and blockIdx.y %d, Idx is %d\n", blockIdx.x, blockIdx.y, idx);
+        if (idx % subdomainLength < subdomainLength/2) {
+            int Idx = ((subdomainLength-1)/2-(idx % subdomainLength)) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xLeftBlock[Idx];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xLeftBlock[Idx];
+            printf("In blockIdx %d, blockIdy %d, sharedMemory[idx=%d] is %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]);
+        }
+        else {
+            int Idx = ((idx % subdomainLength) - (subdomainLength-1)/2 - 1) * subdomainLength + idx/subdomainLength;
+            sharedMemory[idx] = xRightBlock[threadIdx.y + (threadIdx.x-(blockDim.x/2))*blockDim.y];
+            sharedMemory[idx + subdomainLength * subdomainLength] = xRightBlock[threadIdx.y + (threadIdx.x-(blockDim.x/2))*blockDim.y];
+            printf("In blockIdx %d, blockIdy %d, sharedMemory[idx=%d] is %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]);
+        }
+    }
+*/
     __iterativeBlockUpdateToNorthSouth( xTopBlock, xBottomBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, iGrid, method, method);
+			   nxGrids, nyGrids, nyGrids, method, subdomainLength);
 }
 
 __global__
-void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int nxGrids)
+void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int nxGrids, int subdomainLength)
 {
 
     extern __shared__ double sharedMemory[];
-    int numElementsPerBlock = (blockDim.x * blockDim.y)/2;
+    int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
 
@@ -439,27 +520,31 @@ void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int n
 			    xTopGpu + (blockIdx.x + (blockIdx.y-1) * gridDim.x) * numElementsPerBlock :
 			    xTopGpu + (gridDim.x * (gridDim.y-1) + blockIdx.x) * numElementsPerBlock;
 
-    int xShift = blockDim.x * blockIdx.x;
-    int yShift = blockDim.y * blockIdx.y;
+    int xShift = subdomainLength * blockIdx.x;
+    int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
     double * x0Block = x0Gpu + blockShift;
 
-    int idx = threadIdx.x + threadIdx.y * blockDim.x;
+    int index = threadIdx.x + threadIdx.y * blockDim.x;
+    int stride = blockDim.x * blockDim.y;
 
-    if (idx < (blockDim.x * blockDim.y)/2) {
-//        printf("The %dth entry of xTopBlock is %f\n", idx, xTopBlock[idx]);
-//        printf("xTopBlock[idx=%d] goes into sharedMemory[%d]\n", idx, idx+numElementsPerBlock);
+    for (int idx = index; idx < numElementsPerBlock; idx += stride) {
         sharedMemory[idx + numElementsPerBlock] = xTopBlock[idx]; 
-	sharedMemory[threadIdx.x + (blockDim.x)*(blockDim.x/2-1-threadIdx.y)] = xBottomBlock[idx];
+	sharedMemory[(subdomainLength/2 - 1 - idx/subdomainLength) * subdomainLength + idx % subdomainLength] = xBottomBlock[idx];
     }
 
+    for (int idx = index; idx < 2*2*numElementsPerBlock; idx += stride) {
+        printf("In blockIdx %d, blockIdy %d: Final method - The %dth entry of sharedMemory is %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]);
+    }
     __syncthreads();
 
 //    printf("sharedMemory[idx=%d] is %f \n", idx, sharedMemory[idx]);
     
     double * x0 = x0Gpu + blockShift;
-
-    idx = threadIdx.x + threadIdx.y * nxGrids;
-    x0[threadIdx.x + threadIdx.y * nxGrids] = sharedMemory[threadIdx.x + threadIdx.y * blockDim.x];    
+    
+    for (int idx = index; idx < 2*numElementsPerBlock; idx += stride) {
+        int Idx = (idx % subdomainLength) + (idx/subdomainLength) * nxGrids;
+        x0Block[Idx] = sharedMemory[idx];
+    }
 }
 
