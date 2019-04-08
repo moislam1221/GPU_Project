@@ -7,7 +7,8 @@ __device__
 float jacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, const float topMatrix, const float bottomMatrix,
               const float leftX, const float centerX, const float rightX, const float topX, const float bottomX,
               const float centerRhs) {
-    return (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
+    float result = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
+    return result;
 }
 
 float normFromRow(float leftMatrix, float centerMatrix, float rightMatrix, float topMatrix, float bottomMatrix, float leftX, float centerX, float rightX,  float topX, float bottomX, float centerRhs) 
@@ -67,13 +68,47 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
                 float leftX = x0[idx-1];
                 float centerX = x0[idx];
                 float rightX = x0[idx+1];
-                float topX = x0[idx+blockDim.x];
-                float bottomX = x0[idx-blockDim.x];
-                //printf("In iGrid %d, idx = %d, left %f, right %f, center %f, top %f, bottom %f\n", iGrid, idx, leftX, rightX, centerX, topX, bottomX	);
-	        // Perform updatE
-   	        x1[idx] = increment(centerX);
-                //x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                //                 leftX, centerX, rightX, topX, bottomX, centerRhs);
+                float topX = x0[idx+subdomainLength];
+                float bottomX = x0[idx-subdomainLength];
+
+//                printf("rhs is %f\n", centerRhs);
+                
+                // Apply boundary conditions
+                // int Idx = (idx % subdomainLength) +(idx/subdomainLength) * nxGrids;
+
+                // Bottom
+                if (blockIdx.y == 0) {
+                    if (idx < subdomainLength) {
+                        leftX = 0.;
+                    }
+                }
+
+                // Top 
+                if (blockIdx.y == gridDim.y-1) {
+                    if (idx >= subdomainLength * (subdomainLength - 1)) {
+                        topX = 0.;
+                    }
+                }
+
+                // Left
+                if (blockIdx.x == 0) {
+                    if (idx % subdomainLength == 0) {
+                        leftX = 0.;
+                    }
+                }
+ 
+                // Right
+                if (blockIdx.x == gridDim.x-1) {
+                    if ((idx+1) % subdomainLength == 0) {
+                        rightX = 0.;
+                    }
+                }
+
+               // printf("BlockIdx %d and blockIdy %d: In idx = %d, rhsBlock %f, center %f, left %f, right %f, top %f, bottom %f\n", blockIdx.x, blockIdx.y, idx, centerRhs, centerX,  leftX, rightX, topX, bottomX);
+	        // Perform update
+   	        // x1[idx] = increment(centerX);
+                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                                leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 // Synchronize
 	        __syncthreads();
                 
@@ -84,7 +119,6 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
                 float * tmp; tmp = x0; x0 = x1;
     }
 
-    //printf("Yo\n");
     index = threadIdx.x + threadIdx.y * blockDim.x;
     stride = blockDim.x * blockDim.y;
     for (int idx = index; idx < elemPerBlock; idx += stride) {
@@ -148,12 +182,44 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
                 float rightX = x0[idx+1];
                 float topX = x0[idx+blockDim.x];
                 float bottomX = x0[idx-blockDim.x];
+
+                // Apply boundary conditions
+                // int Idx = (idx % subdomainLength) +(idx/subdomainLength) * nxGrids;
+
+                // Bottom
+                if (blockIdx.y == 0) {
+                    if (idx < subdomainLength) {
+                        leftX = 0.;
+                    }
+                }
+
+                // Top 
+                if (blockIdx.y == gridDim.y-1) {
+                    if (idx >= subdomainLength * (subdomainLength - 1)) {
+                        topX = 0.;
+                    }
+                }
+
+                // Left
+                if (blockIdx.x == 0) {
+                    if (idx % subdomainLength == 0) {
+                        leftX = 0.;
+                    }
+                }
+ 
+                // Right
+                if (blockIdx.x == gridDim.x-1) {
+                    if ((idx+1) % subdomainLength == 0) {
+                        rightX = 0.;
+                    }
+                }
+                
                 // Perform update
                 //printf("x1[%d] before incrementing is %f and centerX is %f\n", idx, x1[idx], centerX);
-     	        x1[idx] = increment(centerX);
+     	        // x1[idx] = increment(centerX);
                 //printf("x1[%d] is now %f\n", idx, x1[idx]);
-                //x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                //                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
+                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 // Synchronize
 	        __syncthreads();
 //	        float * tmp; tmp = x0; x0 = x1;
@@ -245,7 +311,6 @@ void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
 			   nxGrids, nyGrids, nxGrids, method, subdomainLength);
     __syncthreads();
-    //printf("End of original");
 
 
     //printf("Hello/n");
