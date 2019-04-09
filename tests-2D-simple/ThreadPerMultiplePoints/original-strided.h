@@ -70,7 +70,7 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
                 float rightX = x0[idx+1];
                 float topX = x0[idx+subdomainLength];
                 float bottomX = x0[idx-subdomainLength];
-
+/*
 //                printf("rhs is %f\n", centerRhs);
                 
                 // Apply boundary conditions
@@ -104,11 +104,11 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
                     }
                 }
 
-               // printf("BlockIdx %d and blockIdy %d: In idx = %d, rhsBlock %f, center %f, left %f, right %f, top %f, bottom %f\n", blockIdx.x, blockIdx.y, idx, centerRhs, centerX,  leftX, rightX, topX, bottomX);
-	        // Perform update
-   	        // x1[idx] = increment(centerX);
-                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                                leftX, centerX, rightX, topX, bottomX, centerRhs); 
+                printf("BlockIdx %d and blockIdy %d: In idx = %d, center %f, left %f, right %f, top %f, bottom %f\n", blockIdx.x, blockIdx.y, idx, centerX,  leftX, rightX, topX, bottomX);
+*/	        // Perform update
+   	        x1[idx] = increment(centerX);
+                // x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                //                leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 // Synchronize
 	        __syncthreads();
                 
@@ -126,7 +126,6 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
     }
 
     __syncthreads();
-    //printf("Hello\n"); 
     for (int idx = index; idx < elemPerBlock/2; idx += stride) {
         xLeftBlock[idx] = x0[subdomainLength * (idx % subdomainLength) + (idx/subdomainLength)];
         xRightBlock[idx] = x0[subdomainLength * (idx % subdomainLength) - (idx/subdomainLength) + (subdomainLength-1)];
@@ -182,44 +181,43 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
                 float rightX = x0[idx+1];
                 float topX = x0[idx+blockDim.x];
                 float bottomX = x0[idx-blockDim.x];
-
+/*                
                 // Apply boundary conditions
-                // int Idx = (idx % subdomainLength) +(idx/subdomainLength) * nxGrids;
-
-                // Bottom
-                if (blockIdx.y == 0) {
-                    if (idx < subdomainLength) {
-                        leftX = 0.;
-                    }
+                int step = idx / stride;
+                int Idx = (stride % subdomainLength) +(stride/subdomainLength) * nxGrids;
+                int IGrid  = iGrid + step * Idx;
+                if (idx % subdomainLength >= subdomainLength / 2 && blockIdx.x == gridDim.x-1) {
+                    IGrid = IGrid - nxGrids;
                 }
 
-                // Top 
-                if (blockIdx.y == gridDim.y-1) {
-                    if (idx >= subdomainLength * (subdomainLength - 1)) {
-                        topX = 0.;
-                    }
+                // Bottom
+                if (IGrid < nxGrids) {
+                    bottomX = 0.0;
+                }
+
+                // Top
+                if (IGrid >= (nxGrids * nyGrids - subdomainLength)) {
+                    topX = 0.0;
                 }
 
                 // Left
-                if (blockIdx.x == 0) {
-                    if (idx % subdomainLength == 0) {
-                        leftX = 0.;
-                    }
-                }
- 
-                // Right
-                if (blockIdx.x == gridDim.x-1) {
-                    if ((idx+1) % subdomainLength == 0) {
-                        rightX = 0.;
-                    }
-                }
+                if (IGrid % nxGrids == 0) {
+                    leftX = 0.0;
+                }               
+
+                // Bottom
+                if (((IGrid+1) % nxGrids) == 0) {
+                    rightX = 0.0;
+                }               
+*/ 
+//                printf("In step %d, BlockIdx %d and blockIdy %d: In idx = %d, IGrid %d, center %f, left %f, right %f, top %f, bottom %f\n", step, blockIdx.x, blockIdx.y, idx, IGrid, centerX,  leftX, rightX, topX, bottomX);
                 
                 // Perform update
                 //printf("x1[%d] before incrementing is %f and centerX is %f\n", idx, x1[idx], centerX);
-     	        // x1[idx] = increment(centerX);
+     	        x1[idx] = increment(centerX);
                 //printf("x1[%d] is now %f\n", idx, x1[idx]);
-                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
+                //x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                //                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 // Synchronize
 	        __syncthreads();
 //	        float * tmp; tmp = x0; x0 = x1;
@@ -376,6 +374,11 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
         }
     }
 
+    int iGrid = blockShift + (index/subdomainLength) * subdomainLength + index % subdomainLength + horizontalShift;
+/*    if ((blockIdx.x == gridDim.x-1) && (index % subdomainLength) >= (subdomainLength/2)) {
+        iGrid = iGrid - nxGrids;
+    }
+*/
 /*
     if (threadIdx.x < blockDim.x/2) {
         sharedMemory[idx] = xLeftBlock[threadIdx.y + (blockDim.x/2-1-threadIdx.x)*blockDim.y];
@@ -389,7 +392,7 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
   
     __iterativeBlockUpdateToNorthSouth(xTopBlock, xBottomBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
-			   nxGrids, nyGrids, nxGrids, method, subdomainLength);
+			   nxGrids, nyGrids, iGrid, method, subdomainLength);
 }
 
 __global__
@@ -403,7 +406,7 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
     int blockShift = xShift + yShift * nxGrids;
     
     int horizontalShift = subdomainLength/2;
-    int verticalShift = blockDim.y/2 * nxGrids;
+    int verticalShift = subdomainLength/2 * nxGrids;
 
     const float * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
     const float * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
@@ -471,6 +474,12 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
            //printf("In blockIdx.x %d, blockidx.y %d, in idx %d we obtain value of %f\n", blockIdx.x, blockIdx.y, idx, sharedMemory[idx]); 
         }
     }
+    
+    int iGrid = blockShift + (index/subdomainLength) * subdomainLength + index % subdomainLength + horizontalShift + verticalShift;
+/*    if ((blockIdx.x == gridDim.x-1) && (index % subdomainLength) >= (subdomainLength/2)) {
+        iGrid = iGrid - nxGrids;
+    }
+*/    
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
     		           leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, topMatrixBlock, bottomMatrixBlock,
 			   nxGrids, nyGrids, nyGrids, method, subdomainLength);

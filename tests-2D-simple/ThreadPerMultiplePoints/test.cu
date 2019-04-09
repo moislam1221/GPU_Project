@@ -157,7 +157,7 @@ int main()
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < numBridgeElemTotal; iGrid++) 
     {
-        std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
+        std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << std::endl;
     }
 
     // PRINT TO SCREEN
@@ -192,13 +192,13 @@ int main()
     {
         std::cout << "Grid Point " << iGrid <<  " x0Cpu " << x0Cpu[iGrid]  << std::endl;
     }
- 
+/* 
     // COMPUTE THE RESIDUAL
     double residual = Residual(x0Cpu, rhsCpu, leftMatrixCpu, centerMatrixCpu, rightMatrixCpu, topMatrixCpu, bottomMatrixCpu, nxGrids, nyGrids); 
 
     // PRINT TO SCREEN
     std::cout << "\n" << "THE RESIDUAL OF MY SOLUTION IS " << residual <<  "\n" << std::endl;
-
+*/
 
     // CLEAN UP
     cudaFree(xLeftGpu);
