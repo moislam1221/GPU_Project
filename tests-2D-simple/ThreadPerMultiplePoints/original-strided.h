@@ -1,5 +1,5 @@
-__device__
-void boundaryConditions(int IGrid, int nxGrids, int nyGrids, float &leftX, float &rightX, float&bottomX, float &topX)
+__host__ __device__
+void boundaryConditions(int IGrid, int nxGrids, int nyGrids, double &leftX, double &rightX, double&bottomX, double &topX)
 {
     // Left
     if (IGrid % nxGrids == 0) {
@@ -26,35 +26,44 @@ void boundaryConditions(int IGrid, int nxGrids, int nyGrids, float &leftX, float
 
 
 __device__
-float increment(float centerX) {
+double increment(double centerX) {
      return centerX + 100.;
 }
 
 __device__
-float jacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, const float topMatrix, const float bottomMatrix,
-              const float leftX, const float centerX, const float rightX, const float topX, const float bottomX,
-              const float centerRhs) {
-    float result = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
+double jacobi(const double leftMatrix, const double centerMatrix, const double rightMatrix, const double topMatrix, const double bottomMatrix,
+              const double leftX, const double centerX, const double rightX, const double topX, const double bottomX,
+              const double centerRhs) {
+    double result = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
     return result;
 }
 
-float normFromRow(float leftMatrix, float centerMatrix, float rightMatrix, float topMatrix, float bottomMatrix, float leftX, float centerX, float rightX,  float topX, float bottomX, float centerRhs) 
+double normFromRow(double leftMatrix, double centerMatrix, double rightMatrix, double topMatrix, double bottomMatrix, double leftX, double centerX, double rightX,  double topX, double bottomX, double centerRhs) 
 {
     return centerRhs - (leftMatrix*leftX + centerMatrix*centerX + rightMatrix*rightX + topMatrix*topX + bottomMatrix*bottomX);
 }
 
-float Residual(const float * solution, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const float * topMatrix, const float * bottomMatrix, int nxGrids, int nyGrids)
+double Residual(const double * solution, const double * rhs, const double * leftMatrix, const double * centerMatrix, const double * rightMatrix, const double * topMatrix, const double * bottomMatrix, int nxGrids, int nyGrids)
 {
     int nDofs = nxGrids * nyGrids;
-    float residual = 0.0;  
+    double residual = 0.0;  
 
     for (int iGrid = 0; iGrid < nDofs; iGrid++) {
-        float leftX = ((iGrid % nxGrids) == 0) ? 0.0 : solution[iGrid-1];
-        float centerX = solution[iGrid];
-        float rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : solution[iGrid+1];
-        float topX = (iGrid < nxGrids * (nyGrids - 1)) ? solution[iGrid + nxGrids] : 0.0;
-        float bottomX = (iGrid >= nxGrids) ?  solution[iGrid-nxGrids] : 0.0;
-        float residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], topMatrix[iGrid], bottomMatrix[iGrid], leftX, centerX, rightX, topX, bottomX, rhs[iGrid]);
+/*        double leftX = ((iGrid % nxGrids) == 0) ? 0.0 : solution[iGrid-1];
+        double centerX = solution[iGrid];
+        double rightX = ((iGrid + 1) % nxGrids == 0) ? 0.0 : solution[iGrid+1];
+        double topX = (iGrid < nxGrids * (nyGrids - 1)) ? solution[iGrid + nxGrids] : 0.0;
+        double bottomX = (iGrid >= nxGrids) ?  solution[iGrid-nxGrids] : 0.0;
+*/
+	double leftX = solution[iGrid-1];
+	double centerX = solution[iGrid];
+	double rightX = solution[iGrid+1];
+	double topX = solution[iGrid+nxGrids];
+	double bottomX = solution[iGrid-nxGrids];
+	
+	boundaryConditions(iGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
+
+        double residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], topMatrix[iGrid], bottomMatrix[iGrid], leftX, centerX, rightX, topX, bottomX, rhs[iGrid]);
 	residual = residual + residualContributionFromRow * residualContributionFromRow;
     }
     residual = sqrt(residual);
@@ -62,19 +71,19 @@ float Residual(const float * solution, const float * rhs, const float * leftMatr
 }
 
 __device__
-void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, const float *rhsBlock, 
-                             const float * leftMatrixBlock, const float *centerMatrixBlock, const float * rightMatrixBlock, 
-			     const float * topMatrixBlock, const float * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, 
+void __iterativeBlockUpdateToLeftRight(double * xLeftBlock, double * xRightBlock, const double *rhsBlock, 
+                             const double * leftMatrixBlock, const double *centerMatrixBlock, const double * rightMatrixBlock, 
+			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, 
                              int subdomainLength, bool diagonal)
 {
     // Initialize shared memory and pointers to x0, x1 arrays containing Jacobi solutions
-    extern __shared__ float sharedMemory[];
-    float * x0 = sharedMemory; 
+    extern __shared__ double sharedMemory[];
+    double * x0 = sharedMemory; 
     int elemPerBlock = subdomainLength * subdomainLength;
-    float * x1 = sharedMemory + elemPerBlock;
+    double * x1 = sharedMemory + elemPerBlock;
 
     // Define number of Jacobi steps to take, and current index and stride value
-    int maxSteps = 1;
+    int maxSteps = 2;
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
 
@@ -83,17 +92,17 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
         for (int idx = index; idx < elemPerBlock; idx += stride) {
            if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-(subdomainLength-1))) {
                 // Define necessary constants
-                float centerRhs = rhsBlock[idx];
-                float leftMatrix = leftMatrixBlock[idx];
-                float centerMatrix = centerMatrixBlock[idx];
-                float rightMatrix = rightMatrixBlock[idx];
-                float topMatrix = topMatrixBlock[idx];
-                float bottomMatrix = bottomMatrixBlock[idx];
-                float leftX = x0[idx-1];
-                float centerX = x0[idx];
-                float rightX = x0[idx+1];
-                float topX = x0[idx+subdomainLength];
-                float bottomX = x0[idx-subdomainLength];
+                double centerRhs = rhsBlock[idx];
+                double leftMatrix = leftMatrixBlock[idx];
+                double centerMatrix = centerMatrixBlock[idx];
+                double rightMatrix = rightMatrixBlock[idx];
+                double topMatrix = topMatrixBlock[idx];
+                double bottomMatrix = bottomMatrixBlock[idx];
+                double leftX = x0[idx-1];
+                double centerX = x0[idx];
+                double rightX = x0[idx+1];
+                double topX = x0[idx+subdomainLength];
+                double bottomX = x0[idx-subdomainLength];
                 
                 // Apply boundary conditions
                 int step = idx / stride;
@@ -110,29 +119,26 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
                     }
                 }
 
-                boundaryConditions(iGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
+                boundaryConditions(IGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
 
-/*
-
-*/	        // Perform update
-//   	        x1[idx] = increment(centerX);
-                // x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                //                leftX, centerX, rightX, topX, bottomX, centerRhs); 
+                __syncthreads();
+	        // Perform update
+   	        // x1[idx] = increment(centerX);
+                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
 
                 // Synchronize
 	        __syncthreads();
                 
 	    }
         }
-                float * tmp; tmp = x0; x0 = x1;
-    }
-
-    index = threadIdx.x + threadIdx.y * blockDim.x;
-    stride = blockDim.x * blockDim.y;
-    for (int idx = index; idx < elemPerBlock; idx += stride) {
+        __syncthreads();
+        double * tmp; tmp = x0; x0 = x1;
     }
 
     __syncthreads();
+    index = threadIdx.x + threadIdx.y * blockDim.x;
+    stride = blockDim.x * blockDim.y;
     for (int idx = index; idx < elemPerBlock/2; idx += stride) {
         xLeftBlock[idx] = x0[subdomainLength * (idx % subdomainLength) + (idx/subdomainLength)];
         xRightBlock[idx] = x0[subdomainLength * (idx % subdomainLength) - (idx/subdomainLength) + (subdomainLength-1)];
@@ -141,15 +147,15 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
 }
 
 __device__
-void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock, const float *rhsBlock, 
-                             const float * leftMatrixBlock, const float *centerMatrixBlock, const float * rightMatrixBlock, 
-			     const float * topMatrixBlock, const float * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, int subdomainLength, bool vertical)
+void __iterativeBlockUpdateToNorthSouth(double * xTopBlock, double * xBottomBlock, const double *rhsBlock, 
+                             const double * leftMatrixBlock, const double *centerMatrixBlock, const double * rightMatrixBlock, 
+			     const double * topMatrixBlock, const double * bottomMatrixBlock, int nxGrids, int nyGrids, int iGrid, int method, int subdomainLength, bool vertical)
 {
-    extern __shared__ float sharedMemory[];
-    float * x0 = sharedMemory; 
+    extern __shared__ double sharedMemory[];
+    double * x0 = sharedMemory; 
     int elemPerBlock = subdomainLength * subdomainLength;
-    float * x1 = sharedMemory + elemPerBlock;
-    int maxSteps = 1;
+    double * x1 = sharedMemory + elemPerBlock;
+    int maxSteps = 2;
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
 
@@ -161,17 +167,17 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
         for (int idx = index; idx < elemPerBlock; idx += stride) {
             if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-subdomainLength-1)) {
                 // Define necessary constants
-                float centerRhs = rhsBlock[idx];
-                float leftMatrix = leftMatrixBlock[idx];
-                float centerMatrix = centerMatrixBlock[idx];
-                float rightMatrix = rightMatrixBlock[idx];
-                float topMatrix = topMatrixBlock[idx];
-                float bottomMatrix = bottomMatrixBlock[idx];
-                float leftX = x0[idx-1];
-                float centerX = x0[idx];
-                float rightX = x0[idx+1];
-                float topX = x0[idx+subdomainLength];
-                float bottomX = x0[idx-subdomainLength];
+                double centerRhs = rhsBlock[idx];
+                double leftMatrix = leftMatrixBlock[idx];
+                double centerMatrix = centerMatrixBlock[idx];
+                double rightMatrix = rightMatrixBlock[idx];
+                double topMatrix = topMatrixBlock[idx];
+                double bottomMatrix = bottomMatrixBlock[idx];
+                double leftX = x0[idx-1];
+                double centerX = x0[idx];
+                double rightX = x0[idx+1];
+                double topX = x0[idx+subdomainLength];
+                double bottomX = x0[idx-subdomainLength];
                 
                 // Apply boundary conditions
                 int step = idx / stride;
@@ -190,20 +196,19 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
                     }
                 }
                 
-                boundaryConditions(iGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
- 
+                boundaryConditions(IGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
+                
+                __syncthreads();
                 // Perform update
-                //printf("x1[%d] before incrementing is %f and centerX is %f\n", idx, x1[idx], centerX);
      	        //x1[idx] = increment(centerX);
-                //printf("x1[%d] is now %f\n", idx, x1[idx]);
-                //x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-                //                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
+                x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                                 leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 
                 // Synchronize
 	        __syncthreads();
                }
 	    }
-	            float * tmp; tmp = x0; x0 = x1;
+	    double * tmp; tmp = x0; x0 = x1;
         }   
     
 
@@ -216,10 +221,10 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
 }
 
 __global__
-void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
-                             const float * x0Gpu, const float *rhsGpu, 
-                             const float * leftMatrixGpu, const float *centerMatrixGpu, const float * rightMatrixGpu, 
-			     const float * topMatrixGpu, const float * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
+void _iterativeGpuOriginal(double * xLeftGpu, double *xRightGpu,
+                             const double * x0Gpu, const double *rhsGpu, 
+                             const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
+			     const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
 
     __syncthreads();
@@ -228,21 +233,21 @@ void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
     int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
 
-    const float * x0Block = x0Gpu + blockShift;
-    const float * rhsBlock = rhsGpu + blockShift;
-    const float * leftMatrixBlock = leftMatrixGpu + blockShift;
-    const float * centerMatrixBlock = centerMatrixGpu + blockShift;
-    const float * rightMatrixBlock = rightMatrixGpu + blockShift;
-    const float * topMatrixBlock = topMatrixGpu + blockShift;
-    const float * bottomMatrixBlock = bottomMatrixGpu + blockShift;
+    const double * x0Block = x0Gpu + blockShift;
+    const double * rhsBlock = rhsGpu + blockShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift;
 
     int numElementsPerBlock = subdomainLength * subdomainLength;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = (numElementsPerBlock*blockID)/2;
-    float * xLeftBlock = xLeftGpu + arrayShift;
-    float * xRightBlock = xRightGpu + arrayShift;
+    double * xLeftBlock = xLeftGpu + arrayShift;
+    double * xRightBlock = xRightGpu + arrayShift;
     
-    extern __shared__ float sharedMemory[];
+    extern __shared__ double sharedMemory[];
 
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
@@ -262,35 +267,35 @@ void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
 }
 
 __global__
-void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xTopGpu, float * xBottomGpu,
-                                  const float * x0Gpu, const float *rhsGpu, 
-                                  const float * leftMatrixGpu, const float *centerMatrixGpu, const float * rightMatrixGpu, 
-			          const float * topMatrixGpu, const float * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
+void _iterativeGpuHorizontalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
+                                  const double * x0Gpu, const double *rhsGpu, 
+                                  const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
+			          const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
     int xShift = subdomainLength * blockIdx.x;
     int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
     int horizontalShift = subdomainLength/2;
 
-    const float * rhsBlock = rhsGpu + blockShift; //+ horizontalShift;
-    const float * leftMatrixBlock = leftMatrixGpu + blockShift; //+ horizontalShift;
-    const float * centerMatrixBlock = centerMatrixGpu + blockShift; //+ horizontalShift;
-    const float * rightMatrixBlock = rightMatrixGpu + blockShift; //+ horizontalShift;
-    const float * topMatrixBlock = topMatrixGpu + blockShift; //+ horizontalShift;
-    const float * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ horizontalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ horizontalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ horizontalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ horizontalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ horizontalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ horizontalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ horizontalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
     
-    float * xLeftBlock =  xRightGpu + arrayShift;
-    float * xRightBlock = (blockIdx.x != gridDim.x-1) ?
+    double * xLeftBlock =  xRightGpu + arrayShift;
+    double * xRightBlock = (blockIdx.x != gridDim.x-1) ?
                            xLeftGpu + arrayShift + numElementsPerBlock :
 			   xLeftGpu + (numElementsPerBlock * blockIdx.y * gridDim.x);
-    float * xBottomBlock = xBottomGpu + arrayShift;
-    float * xTopBlock = xTopGpu + arrayShift;
+    double * xBottomBlock = xBottomGpu + arrayShift;
+    double * xTopBlock = xTopGpu + arrayShift;
 
-    extern __shared__ float sharedMemory[];
+    extern __shared__ double sharedMemory[];
     
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
@@ -318,10 +323,10 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
 }
 
 __global__
-void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xTopGpu, float * xBottomGpu,
-                                const float * x0Gpu, const float *rhsGpu, 
-                                const float * leftMatrixGpu, const float *centerMatrixGpu, const float * rightMatrixGpu, 
-			        const float * topMatrixGpu, const float * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
+void _iterativeGpuVerticalandHorizontalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
+                                const double * x0Gpu, const double *rhsGpu, 
+                                const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
+			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
     int xShift = subdomainLength * blockIdx.x;
     int yShift = subdomainLength * blockIdx.y;
@@ -330,25 +335,25 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
     int horizontalShift = subdomainLength/2;
     int verticalShift = subdomainLength/2 * nxGrids;
 
-    const float * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
-    const float * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
-    const float * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
-    const float * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
-    const float * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
-    const float * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
-    float * xBottomBlock = xTopGpu + arrayShift;
-    float * xTopBlock = (blockIdx.y != gridDim.y-1) ?
+    double * xBottomBlock = xTopGpu + arrayShift;
+    double * xTopBlock = (blockIdx.y != gridDim.y-1) ?
                          xBottomGpu + numElementsPerBlock * gridDim.x + arrayShift :
 			 xBottomGpu + (numElementsPerBlock * blockIdx.x);
     
-    float * xLeftBlock = xLeftGpu + arrayShift;
-    float * xRightBlock = xRightGpu + arrayShift;
+    double * xLeftBlock = xLeftGpu + arrayShift;
+    double * xRightBlock = xRightGpu + arrayShift;
 
-    extern __shared__ float sharedMemory[];
+    extern __shared__ double sharedMemory[];
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
 
@@ -372,36 +377,36 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
 
 
 __global__
-void _iterativeGpuVerticalShift(float * xLeftGpu, float *xRightGpu, float * xTopGpu, float * xBottomGpu,
-                                const float * x0Gpu, const float *rhsGpu, 
-                                const float * leftMatrixGpu, const float *centerMatrixGpu, const float * rightMatrixGpu, 
-			        const float * topMatrixGpu, const float * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
+void _iterativeGpuVerticalShift(double * xLeftGpu, double *xRightGpu, double * xTopGpu, double * xBottomGpu,
+                                const double * x0Gpu, const double *rhsGpu, 
+                                const double * leftMatrixGpu, const double *centerMatrixGpu, const double * rightMatrixGpu, 
+			        const double * topMatrixGpu, const double * bottomMatrixGpu, int nxGrids, int nyGrids, int method, int subdomainLength)
 {
     int xShift = subdomainLength * blockIdx.x;
     int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
     int verticalShift = subdomainLength/2 * nxGrids;
 
-    const float * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
-    const float * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
-    const float * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
-    const float * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
-    const float * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
-    const float * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
+    const double * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
+    const double * leftMatrixBlock = leftMatrixGpu + blockShift; //+ verticalShift;
+    const double * centerMatrixBlock = centerMatrixGpu + blockShift; //+ verticalShift;
+    const double * rightMatrixBlock = rightMatrixGpu + blockShift; //+ verticalShift;
+    const double * topMatrixBlock = topMatrixGpu + blockShift; //+ verticalShift;
+    const double * bottomMatrixBlock = bottomMatrixGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
     
-    float * xRightBlock =  xLeftGpu + arrayShift;
-    float * xLeftBlock = (blockIdx.x != 0) ?
+    double * xRightBlock =  xLeftGpu + arrayShift;
+    double * xLeftBlock = (blockIdx.x != 0) ?
                            xRightGpu + arrayShift - numElementsPerBlock :
     			   xRightGpu + numElementsPerBlock * ((gridDim.x-1) + blockIdx.y * gridDim.x);
     
-    float * xBottomBlock = xBottomGpu + arrayShift;
-    float * xTopBlock = xTopGpu + arrayShift;
+    double * xBottomBlock = xBottomGpu + arrayShift;
+    double * xTopBlock = xTopGpu + arrayShift;
 
-    extern __shared__ float sharedMemory[];
+    extern __shared__ double sharedMemory[];
 
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
@@ -427,22 +432,22 @@ void _iterativeGpuVerticalShift(float * xLeftGpu, float *xRightGpu, float * xTop
 }
 
 __global__
-void _finalSolution(float * xTopGpu, float * xBottomGpu, float * x0Gpu, int nxGrids, int subdomainLength)
+void _finalSolution(double * xTopGpu, double * xBottomGpu, double * x0Gpu, int nxGrids, int subdomainLength)
 {
-    extern __shared__ float sharedMemory[];
+    extern __shared__ double sharedMemory[];
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
     int arrayShift = numElementsPerBlock*blockID;
 
-    float * xTopBlock = xBottomGpu + arrayShift;
-    float * xBottomBlock = (blockIdx.y != 0) ?
+    double * xTopBlock = xBottomGpu + arrayShift;
+    double * xBottomBlock = (blockIdx.y != 0) ?
 			    xTopGpu + (blockIdx.x + (blockIdx.y-1) * gridDim.x) * numElementsPerBlock :
 			    xTopGpu + (gridDim.x * (gridDim.y-1) + blockIdx.x) * numElementsPerBlock;
 
     int xShift = subdomainLength * blockIdx.x;
     int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
-    float * x0Block = x0Gpu + blockShift;
+    double * x0Block = x0Gpu + blockShift;
 
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
@@ -455,7 +460,7 @@ void _finalSolution(float * xTopGpu, float * xBottomGpu, float * x0Gpu, int nxGr
     __syncthreads();
 
     
-    float * x0 = x0Gpu + blockShift;
+    double * x0 = x0Gpu + blockShift;
     
     for (int idx = index; idx < 2*numElementsPerBlock; idx += stride) {
         int Idx = (idx % subdomainLength) + (idx/subdomainLength) * nxGrids;

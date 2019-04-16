@@ -17,20 +17,21 @@
 
 #include "original-strided.h"
 
-int main()
+int main(int argc, char *argv[])
 {
     // INPUTS
     int nxGrids = 8;
     int nyGrids = 8;
     int subdomainLength = 4;
     int threadsPerBlock = 2;
+    int iterations = atoi(argv[1]);
    
     // SETTING GRID, BLOCK, THREAD INFORMATION 
     int nxBlocks = nxGrids / subdomainLength;
     int nyBlocks = nyGrids / subdomainLength;
     dim3 grid(nxBlocks, nyBlocks);
     dim3 block(threadsPerBlock, threadsPerBlock);
-    int sharedMemory = subdomainLength * subdomainLength * 2 * sizeof(float);
+    int sharedMemory = subdomainLength * subdomainLength * 2 * sizeof(double);
     
     // PANEL ARRAY SIZES
     int elemPerBlock = subdomainLength * subdomainLength;
@@ -38,35 +39,35 @@ int main()
     int numBridgeElemTotal = nxBlocks * nyBlocks * numBridgeElemPerBlock;
 
     // OTHER PARAMETERS
-    float dx = 1.0/ (nxGrids + 1);
-    float dy = 1.0/ (nyGrids + 1);
+    double dx = 1.0/ (nxGrids + 1);
+    double dy = 1.0/ (nyGrids + 1);
     int nDofs = nxGrids * nyGrids;
     
     // INT AND POINTER FOR UNUSED PARAMETERS    
     int notUsedInt;
-    float * notUsed;
+    double * notUsed;
 
     // INITIALIZATION
-    float * initX = new float[nDofs];
-    float * x0Cpu = new float[nDofs];
-    float * xLeftCpu = new float[numBridgeElemTotal];
-    float * xRightCpu = new float[numBridgeElemTotal];
-    float * xTopCpu = new float[numBridgeElemTotal];
-    float * xBottomCpu = new float[numBridgeElemTotal];
+    double * initX = new double[nDofs];
+    double * x0Cpu = new double[nDofs];
+    double * xLeftCpu = new double[numBridgeElemTotal];
+    double * xRightCpu = new double[numBridgeElemTotal];
+    double * xTopCpu = new double[numBridgeElemTotal];
+    double * xBottomCpu = new double[numBridgeElemTotal];
 
     // INITIAL SOLUTION
     for (int iGrid = 0; iGrid < nDofs; iGrid++) 
     {
-        initX[iGrid] = iGrid;
+        initX[iGrid] = 1.0;
     }
 
     // INITALIZE MATRIX ELEMENTS
-    float * rhsCpu = new float[nDofs];
-    float * leftMatrixCpu = new float[nDofs];
-    float * centerMatrixCpu = new float[nDofs];
-    float * rightMatrixCpu = new float[nDofs];
-    float * bottomMatrixCpu = new float[nDofs];
-    float * topMatrixCpu = new float[nDofs];
+    double * rhsCpu = new double[nDofs];
+    double * leftMatrixCpu = new double[nDofs];
+    double * centerMatrixCpu = new double[nDofs];
+    double * rightMatrixCpu = new double[nDofs];
+    double * bottomMatrixCpu = new double[nDofs];
+    double * topMatrixCpu = new double[nDofs];
 
     // FILL IN MATRIX ELEMENTS FOR 2D POISSON
     for (int iGrid = 0; iGrid < nDofs; iGrid++) 
@@ -80,127 +81,129 @@ int main()
     }
    
     // ALLOCATE SOLUTION MEMORY - CPU AND GPU
-    float * x0Gpu;
-    cudaMalloc(&x0Gpu, sizeof(float) * (nDofs));
-    cudaMemcpy(x0Gpu, initX, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
+    double * x0Gpu;
+    cudaMalloc(&x0Gpu, sizeof(double) * (nDofs));
+    cudaMemcpy(x0Gpu, initX, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
     
     // ALLOCATE PANEL ARRAY MEMORY
-    float *xLeftGpu, *xRightGpu, *xTopGpu, *xBottomGpu;
-    cudaMalloc(&xLeftGpu, sizeof(float) * numBridgeElemTotal);
-    cudaMalloc(&xRightGpu, sizeof(float) * numBridgeElemTotal);
-    cudaMalloc(&xTopGpu, sizeof(float) * numBridgeElemTotal);
-    cudaMalloc(&xBottomGpu, sizeof(float) * numBridgeElemTotal);
+    double *xLeftGpu, *xRightGpu, *xTopGpu, *xBottomGpu;
+    cudaMalloc(&xLeftGpu, sizeof(double) * numBridgeElemTotal);
+    cudaMalloc(&xRightGpu, sizeof(double) * numBridgeElemTotal);
+    cudaMalloc(&xTopGpu, sizeof(double) * numBridgeElemTotal);
+    cudaMalloc(&xBottomGpu, sizeof(double) * numBridgeElemTotal);
    
     // ALLOCATE MATRIX MEMORY
-    float * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu, * bottomMatrixGpu, * topMatrixGpu;
-    cudaMalloc(&rhsGpu, sizeof(float) * nDofs);
-    cudaMalloc(&leftMatrixGpu, sizeof(float) * nDofs);
-    cudaMalloc(&rightMatrixGpu, sizeof(float) * nDofs);
-    cudaMalloc(&centerMatrixGpu, sizeof(float) * nDofs);
-    cudaMalloc(&bottomMatrixGpu, sizeof(float) * nDofs);
-    cudaMalloc(&topMatrixGpu, sizeof(float) * nDofs);
-    cudaMemcpy(rhsGpu, rhsCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
-    cudaMemcpy(leftMatrixGpu, leftMatrixCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
-    cudaMemcpy(centerMatrixGpu, centerMatrixCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
-    cudaMemcpy(rightMatrixGpu, rightMatrixCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
-    cudaMemcpy(bottomMatrixGpu, bottomMatrixCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
-    cudaMemcpy(topMatrixGpu, topMatrixCpu, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
+    double * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu, * bottomMatrixGpu, * topMatrixGpu;
+    cudaMalloc(&rhsGpu, sizeof(double) * nDofs);
+    cudaMalloc(&leftMatrixGpu, sizeof(double) * nDofs);
+    cudaMalloc(&rightMatrixGpu, sizeof(double) * nDofs);
+    cudaMalloc(&centerMatrixGpu, sizeof(double) * nDofs);
+    cudaMalloc(&bottomMatrixGpu, sizeof(double) * nDofs);
+    cudaMalloc(&topMatrixGpu, sizeof(double) * nDofs);
+    cudaMemcpy(rhsGpu, rhsCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
+    cudaMemcpy(leftMatrixGpu, leftMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
+    cudaMemcpy(centerMatrixGpu, centerMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
+    cudaMemcpy(rightMatrixGpu, rightMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
+    cudaMemcpy(bottomMatrixGpu, bottomMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
+    cudaMemcpy(topMatrixGpu, topMatrixCpu, sizeof(double) * nDofs, cudaMemcpyHostToDevice);
 
     // PRINT TO SCREEN
-    std::cout << "\n" << "NOW APPLYING FIRST UPDATE" << "\n" << std::endl;
+//    std::cout << "\n" << "NOW APPLYING FIRST UPDATE" << "\n" << std::endl;
     
+    for (int i = 0; i < iterations; i++) {  
+
     // APPLY METHOD TO ADVANCE POINTS (NO SHIFT)
     _iterativeGpuOriginal <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, x0Gpu, rhsGpu,
 		   						 leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
 
 /*    // COPY TO CPU 
-    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < numBridgeElemTotal; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << std::endl;
     }
-*/
+
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING HORIZONTAL UPDATE" << "\n" << std::endl;
-
+*/
     // APPLY HORIZONTAL SHIFT
     _iterativeGpuHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
-
-/*   
+/*
     // COPY TO CPU 
-    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xTopCpu, xTopGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xTopCpu, xTopGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < numBridgeElemTotal; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid << " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-*/
+
 
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING VERTICAL AND HORIZONTAL SHIFT METHOD" << "\n" << std::endl;
-
+*/
     // APPLY VERTICAL SHIFT
     _iterativeGpuVerticalandHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
 /*   
     // COPY TO CPU 
-    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xTopCpu, xTopGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xTopCpu, xTopGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < numBridgeElemTotal; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << std::endl;
     }
-*/
+
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING PURELY VERTICAL SHIFT METHOD" << "\n" << std::endl;
-
+*/
     // APPLY VERTICAL SHIFT
     _iterativeGpuVerticalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
-   
-/*    // COPY TO CPU 
-    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xTopCpu, xTopGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
-    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+/*   
+    // COPY TO CPU 
+    cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xRightCpu, xRightGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xTopCpu, xTopGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
+    cudaMemcpy(xBottomCpu, xBottomGpu, sizeof(double) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < numBridgeElemTotal; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid <<  " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-*/    
+    
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING FINAL METHOD" << "\n" << std::endl;
-
+*/
     // APPLY FINAL STEP
     _finalSolution <<<grid, block, sharedMemory>>>(xTopGpu, xBottomGpu, x0Gpu, nxGrids, subdomainLength);
-/*    
+    
+    }
+
     // COPY TO CPU 
-    cudaMemcpy(x0Cpu, x0Gpu, sizeof(float) * nDofs, cudaMemcpyDeviceToHost);
+    cudaMemcpy(x0Cpu, x0Gpu, sizeof(double) * nDofs, cudaMemcpyDeviceToHost);
     
     // PRINT RESULTS
     for (int iGrid = 0; iGrid < nDofs; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid <<  " x0Cpu " << x0Cpu[iGrid]  << std::endl;
     }
-*/
-/* 
+
     // COMPUTE THE RESIDUAL
     double residual = Residual(x0Cpu, rhsCpu, leftMatrixCpu, centerMatrixCpu, rightMatrixCpu, topMatrixCpu, bottomMatrixCpu, nxGrids, nyGrids); 
 
     // PRINT TO SCREEN
     std::cout << "\n" << "THE RESIDUAL OF MY SOLUTION IS " << residual <<  "\n" << std::endl;
-*/
+
 
     // CLEAN UP
     cudaFree(xLeftGpu);
