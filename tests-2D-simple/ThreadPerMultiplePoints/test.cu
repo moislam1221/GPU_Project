@@ -113,7 +113,7 @@ int main()
     _iterativeGpuOriginal <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, x0Gpu, rhsGpu,
 		   						 leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
 
-    // COPY TO CPU 
+/*    // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     
@@ -122,13 +122,14 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << std::endl;
     }
-
+*/
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING HORIZONTAL UPDATE" << "\n" << std::endl;
 
     // APPLY HORIZONTAL SHIFT
     _iterativeGpuHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
-   
+
+/*   
     // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -140,14 +141,14 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-
+*/
 
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING VERTICAL AND HORIZONTAL SHIFT METHOD" << "\n" << std::endl;
 
     // APPLY VERTICAL SHIFT
     _iterativeGpuVerticalandHorizontalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
-   
+/*   
     // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -159,14 +160,14 @@ int main()
     {
         std::cout << "Grid Point " << iGrid << " xLeft " << xLeftCpu[iGrid] << " xRight " << xRightCpu[iGrid] << std::endl;
     }
-
+*/
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING PURELY VERTICAL SHIFT METHOD" << "\n" << std::endl;
 
     // APPLY VERTICAL SHIFT
     _iterativeGpuVerticalShift <<<grid, block, sharedMemory>>> (xLeftGpu, xRightGpu, xTopGpu, xBottomGpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, topMatrixGpu, bottomMatrixGpu, nxGrids, nyGrids, notUsedInt, subdomainLength);
    
-    // COPY TO CPU 
+/*    // COPY TO CPU 
     cudaMemcpy(xLeftCpu, xLeftGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xRightCpu, xRightGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
     cudaMemcpy(xTopCpu, xTopGpu, sizeof(float) * numBridgeElemTotal, cudaMemcpyDeviceToHost);
@@ -177,13 +178,13 @@ int main()
     {
         std::cout << "Grid Point " << iGrid <<  " xTop " << xTopCpu[iGrid] << " xBottom " << xBottomCpu[iGrid] << std::endl;
     }
-    
+*/    
     // PRINT TO SCREEN
     std::cout << "\n" << "NOW APPLYING FINAL METHOD" << "\n" << std::endl;
 
     // APPLY FINAL STEP
     _finalSolution <<<grid, block, sharedMemory>>>(xTopGpu, xBottomGpu, x0Gpu, nxGrids, subdomainLength);
-    
+/*    
     // COPY TO CPU 
     cudaMemcpy(x0Cpu, x0Gpu, sizeof(float) * nDofs, cudaMemcpyDeviceToHost);
     
@@ -192,6 +193,7 @@ int main()
     {
         std::cout << "Grid Point " << iGrid <<  " x0Cpu " << x0Cpu[iGrid]  << std::endl;
     }
+*/
 /* 
     // COMPUTE THE RESIDUAL
     double residual = Residual(x0Cpu, rhsCpu, leftMatrixCpu, centerMatrixCpu, rightMatrixCpu, topMatrixCpu, bottomMatrixCpu, nxGrids, nyGrids); 
