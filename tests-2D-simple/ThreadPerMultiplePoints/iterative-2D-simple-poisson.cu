@@ -17,7 +17,7 @@
 
 enum method_type { JACOBI, GS, SOR };
 
-__device__
+__host__ __device__
 float jacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, const float topMatrix, const float bottomMatrix,
               const float leftX, const float centerX, const float rightX, const float topX, const float bottomX,
               const float centerRhs) {
@@ -146,16 +146,8 @@ float * iterativeCpu(const float * initX, const float * rhs,
             float rightX = (((iGrid + 1) % nxGrids) == 0) ? 0.0f : x0[iGrid + 1];
 	    float bottomX = (iGrid < nxGrids) ? 0.0f : x0[iGrid - nxGrids];
             float topX = (iGrid < nDofs - nxGrids) ? x0[iGrid + nxGrids] : 0.0f;
-	    if (iIter % 2 == 0) {
-                x1[iGrid] = iterativeOperation(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
-				    leftX, centerX, rightX, topX, bottomX, rhs[iGrid], iGrid, method);
-	    }
-	    else { 
-                x1[iGrid] = iterativeOperation2(leftMatrix, centerMatrix,
-                                    rightMatrix, topMatrix, bottomMatrix,
-				    leftX, centerX, rightX, topX, bottomX,
-                                    rhs[iGrid], iGrid, method);
-            }
+            x1[iGrid] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                           leftX, centerX, rightX, topX, bottomX, rhs[iGrid]); 
         }
         float * tmp = x0; x0 = x1; x1 = tmp;
     }
@@ -184,16 +176,8 @@ void _iterativeGpuClassicIteration(float * x1, const float * x0, const float * r
         float rightX = (ixGrid == nxGrids - 1) ?  0.0f : x0[iGrid + 1];
 	float topX = (iyGrid == nyGrids - 1) ? 0.0f : x0[iGrid + nxGrids];
         float bottomX = (iyGrid == 0) ? 0.0f : x0[iGrid - nxGrids];
-	if (iteration % 2 == 0) {
-            x1[iGrid] = iterativeOperation(leftMatrix, centerMatrix,
-                                    rightMatrix, topMatrix, bottomMatrix,
-				    leftX, centerX, rightX, topX, bottomX, rhs[iGrid], iGrid, method);
-	}
-	else { 
-            x1[iGrid] = iterativeOperation2(leftMatrix, centerMatrix,
-                                    rightMatrix, topMatrix, bottomMatrix,
-				    leftX, centerX, rightX, topX, bottomX, rhs[iGrid], iGrid, method);
-	}
+        x1[iGrid] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+                           leftX, centerX, rightX, topX, bottomX, rhs[iGrid]); 
     }
     __syncthreads();
 }
@@ -253,8 +237,7 @@ float * iterativeGpuClassic(const float * initX, const float * rhs,
 
 __device__
 void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, const float *rhsBlock, 
-                             const float leftMatrix, const float centerMatrix, const float rightMatrix, 
-			     const float topMatrix, const float bottomMatrix, int nxGrids, int nyGrids, int iGrid, int method, 
+                             const float * matrixElements, int nxGrids, int nyGrids, int iGrid, int method, 
                              int subdomainLength, bool diagonal, int maxSteps)
 {
     // Initialize shared memory and pointers to x0, x1 arrays containing Jacobi solutions
@@ -263,18 +246,22 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
     int elemPerBlock = subdomainLength * subdomainLength;
     float * x1 = sharedMemory + elemPerBlock;
 
+    const float leftMatrix = matrixElements[1];
+    const float centerMatrix = matrixElements[2];
+    const float rightMatrix = matrixElements[3];
+    const float topMatrix = matrixElements[4];
+    const float bottomMatrix = matrixElements[0];
+
     // Define number of Jacobi steps to take, and current index and stride value
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
-
-    // Define rhs
-    float centerRhs = rhsBlock[index];
 
     // Perform Jacobi iterations
     for (int k = 0; k < maxSteps; k++) {
         for (int idx = index; idx < elemPerBlock; idx += stride) {
            if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-(subdomainLength-1))) {
                 // Define necessary constants
+                float centerRhs = rhsBlock[idx];
                 float leftX = x0[idx-1];
                 float centerX = x0[idx];
                 float rightX = x0[idx+1];
@@ -298,17 +285,22 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
 
                 boundaryConditions(IGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
 
+                // __syncthreads();
 	        // Perform update
    	        // x1[idx] = increment(centerX);
                 x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                                  leftX, centerX, rightX, topX, bottomX, centerRhs); 
+
+                // Synchronize
+	        //__syncthreads();
+                
 	    }
         }
         __syncthreads();
-        float * tmp; 
-        tmp = x0; x0 = x1; x1 = tmp;
+        float * tmp; tmp = x0; x0 = x1;
     }
 
+    // __syncthreads();
     index = threadIdx.x + threadIdx.y * blockDim.x;
     stride = blockDim.x * blockDim.y;
     for (int idx = index; idx < elemPerBlock/2; idx += stride) {
@@ -320,8 +312,7 @@ void __iterativeBlockUpdateToLeftRight(float * xLeftBlock, float * xRightBlock, 
 
 __device__
 void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock, const float *rhsBlock, 
-                             const float leftMatrix, const float centerMatrix, const float rightMatrix, 
-			     const float topMatrix, const float bottomMatrix, int nxGrids, int nyGrids, int iGrid, int method, int subdomainLength, bool vertical, int maxSteps)
+                             const float * matrixElements, int nxGrids, int nyGrids, int iGrid, int method, int subdomainLength, bool vertical, int maxSteps)
 {
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory; 
@@ -329,14 +320,19 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
     float * x1 = sharedMemory + elemPerBlock;
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
-    
-    // Define rhs
-    float centerRhs = rhsBlock[index];
+
+    const float leftMatrix = matrixElements[1];
+    const float centerMatrix = matrixElements[2];
+    const float rightMatrix = matrixElements[3];
+    const float topMatrix = matrixElements[4];
+    const float bottomMatrix = matrixElements[0];
 
     for (int k = 0; k < maxSteps; k++) {
         for (int idx = index; idx < elemPerBlock; idx += stride) {
             if ((idx % subdomainLength != 0) && ((idx+1) % subdomainLength != 0) && (idx > subdomainLength-1) && (idx < elemPerBlock-subdomainLength-1)) {
+
                 // Define necessary constants
+                float centerRhs = rhsBlock[idx];
                 float leftX = x0[idx-1];
                 float centerX = x0[idx];
                 float rightX = x0[idx+1];
@@ -362,16 +358,18 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
                 
                 boundaryConditions(IGrid, nxGrids, nyGrids, leftX, rightX, bottomX, topX);
                 
+                // __syncthreads();
                 // Perform update
      	        //x1[idx] = increment(centerX);
                 x1[idx] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                                  leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 
+                // Synchronize
+	        //__syncthreads();
                }
 	    }
             __syncthreads();
-	    float * tmp; 
-            tmp = x0; x0 = x1; x1 = tmp;
+	    float * tmp; tmp = x0; x0 = x1;
         }   
     
 
@@ -384,22 +382,19 @@ void __iterativeBlockUpdateToNorthSouth(float * xTopBlock, float * xBottomBlock,
 }
 
 __global__
-void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
-                             const float * x0Gpu, const float *rhsGpu, 
-                             const float * matrixElementsGpu, int nxGrids, int nyGrids, int method, int subdomainLength, int maxSteps)
+void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu, const float * x0Gpu, const float *rhsGpu, 
+                             const float * matrixElementsGpu, 
+			     int nxGrids, int nyGrids, int method, int subdomainLength, int maxSteps)
 {
+
+    // __syncthreads();
+
     int xShift = subdomainLength * blockIdx.x;
     int yShift = subdomainLength * blockIdx.y;
     int blockShift = xShift + yShift * nxGrids;
 
     const float * x0Block = x0Gpu + blockShift;
     const float * rhsBlock = rhsGpu + blockShift;
-    
-    const float bottomMatrix = matrixElementsGpu[0];
-    const float leftMatrix = matrixElementsGpu[1];
-    const float centerMatrix = matrixElementsGpu[2];
-    const float rightMatrix = matrixElementsGpu[3];
-    const float topMatrix = matrixElementsGpu[4];
 
     int numElementsPerBlock = subdomainLength * subdomainLength;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -419,13 +414,16 @@ void _iterativeGpuOriginal(float * xLeftGpu, float *xRightGpu,
     int iGrid = blockShift + (index/subdomainLength) * nxGrids + index % subdomainLength;
     
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
-    		           leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+    		           matrixElementsGpu,
 			   nxGrids, nyGrids, iGrid, method, subdomainLength, false, maxSteps);
+    // __syncthreads();
+
+
 }
 
 __global__
 void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xTopGpu, float * xBottomGpu,
-                                  const float * x0Gpu, const float * rhsGpu, 
+                                  const float * x0Gpu, const float *rhsGpu, 
                                   const float * matrixElementsGpu, int nxGrids, int nyGrids, int method, int subdomainLength, int maxSteps)
 {
     int xShift = subdomainLength * blockIdx.x;
@@ -433,13 +431,7 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
     int blockShift = xShift + yShift * nxGrids;
     int horizontalShift = subdomainLength/2;
 
-    const float * rhsBlock = rhsGpu + blockShift;
-
-    const float bottomMatrix = matrixElementsGpu[0];
-    const float leftMatrix = matrixElementsGpu[1];
-    const float centerMatrix = matrixElementsGpu[2];
-    const float rightMatrix = matrixElementsGpu[3];
-    const float topMatrix = matrixElementsGpu[4];
+    const float * rhsBlock = rhsGpu + blockShift; //+ horizontalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -456,6 +448,7 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
     
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
+    int idx = index;
     for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
         if (idx % subdomainLength < subdomainLength/2) {
             int Idx = ((subdomainLength-1)/2-(idx % subdomainLength)) * subdomainLength + idx/subdomainLength;
@@ -471,14 +464,16 @@ void _iterativeGpuHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xT
 
     int iGrid = blockShift + (index/subdomainLength) * nxGrids + index % subdomainLength + horizontalShift;
 
+    //__syncthreads();
+  
     __iterativeBlockUpdateToNorthSouth(xTopBlock, xBottomBlock, rhsBlock,
-    		           leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+    		           matrixElementsGpu,
 			   nxGrids, nyGrids, iGrid, method, subdomainLength, false, maxSteps);
 }
 
 __global__
 void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu, float * xTopGpu, float * xBottomGpu,
-                                const float * x0Gpu, const float *rhsGpu, 
+                                const float * x0Gpu, const float * rhsGpu, 
                                 const float * matrixElementsGpu, int nxGrids, int nyGrids, int method, int subdomainLength, int maxSteps)
 {
     int xShift = subdomainLength * blockIdx.x;
@@ -488,13 +483,7 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
     int horizontalShift = subdomainLength/2;
     int verticalShift = subdomainLength/2 * nxGrids;
 
-    const float * rhsBlock = rhsGpu + blockShift;
-    
-    const float bottomMatrix = matrixElementsGpu[0];
-    const float leftMatrix = matrixElementsGpu[1];
-    const float centerMatrix = matrixElementsGpu[2];
-    const float rightMatrix = matrixElementsGpu[3];
-    const float topMatrix = matrixElementsGpu[4];
+    const float * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -525,7 +514,7 @@ void _iterativeGpuVerticalandHorizontalShift(float * xLeftGpu, float *xRightGpu,
     int iGrid = blockShift + (index/subdomainLength) * nxGrids + index % subdomainLength + horizontalShift + verticalShift;
     
     __iterativeBlockUpdateToLeftRight(xLeftBlock, xRightBlock, rhsBlock,
-    		           leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+    		           matrixElementsGpu,
 			   nxGrids, nyGrids, iGrid, method, subdomainLength, true, maxSteps);
 }
 
@@ -540,13 +529,7 @@ void _iterativeGpuVerticalShift(float * xLeftGpu, float *xRightGpu, float * xTop
     int blockShift = xShift + yShift * nxGrids;
     int verticalShift = subdomainLength/2 * nxGrids;
 
-    const float * rhsBlock = rhsGpu + blockShift;
-    
-    const float bottomMatrix = matrixElementsGpu[0];
-    const float leftMatrix = matrixElementsGpu[1];
-    const float centerMatrix = matrixElementsGpu[2];
-    const float rightMatrix = matrixElementsGpu[3];
-    const float topMatrix = matrixElementsGpu[4];
+    const float * rhsBlock = rhsGpu + blockShift; //+ verticalShift;
 
     int numElementsPerBlock = (subdomainLength * subdomainLength)/2;
     int blockID = blockIdx.x + blockIdx.y * gridDim.x;
@@ -564,6 +547,7 @@ void _iterativeGpuVerticalShift(float * xLeftGpu, float *xRightGpu, float * xTop
 
     int index = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
+    int idx = index;
     for (int idx = index; idx < subdomainLength * subdomainLength; idx += stride) {
         if (idx % subdomainLength < subdomainLength/2) {
             int Idx = ((subdomainLength-1)/2-(idx % subdomainLength)) * subdomainLength + idx/subdomainLength;
@@ -579,8 +563,8 @@ void _iterativeGpuVerticalShift(float * xLeftGpu, float *xRightGpu, float * xTop
 
     int iGrid = blockShift + (index/subdomainLength) * nxGrids + index % subdomainLength + verticalShift;
 
-    __iterativeBlockUpdateToNorthSouth(xTopBlock, xBottomBlock, rhsBlock,
-    		           leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
+    __iterativeBlockUpdateToNorthSouth( xTopBlock, xBottomBlock, rhsBlock,
+    		           matrixElementsGpu,
 			   nxGrids, nyGrids, iGrid, method, subdomainLength, true, maxSteps);
 }
 
@@ -611,7 +595,7 @@ void _finalSolution(float * xTopGpu, float * xBottomGpu, float * x0Gpu, int nxGr
     }
 
     __syncthreads();
-    
+
     for (int idx = index; idx < 2*numElementsPerBlock; idx += stride) {
         int Idx = (idx % subdomainLength) + (idx/subdomainLength) * nxGrids;
         x0Block[Idx] = sharedMemory[idx];
@@ -625,8 +609,8 @@ float * iterativeGpuSwept(const float * initX, const float * rhs,
 	int nxGrids, int nyGrids, int nIters, int maxSteps, const int threadsPerBlock, const int method, const int subdomainLength)
 {     
     // Determine number of threads and blocks 
-    const int nxBlocks = (int)ceil(nxGrids / (float)threadsPerBlock);
-    const int nyBlocks = (int)ceil(nyGrids / (float)threadsPerBlock);
+    const int nxBlocks = (int)ceil(nxGrids / (float)subdomainLength);
+    const int nyBlocks = (int)ceil(nyGrids / (float)subdomainLength);
     const int nDofs = nxGrids * nyGrids;
 
     dim3 grid(nxBlocks, nyBlocks);
@@ -678,6 +662,8 @@ float * iterativeGpuSwept(const float * initX, const float * rhs,
     cudaFree(x0Gpu);
     cudaFree(xLeftGpu);
     cudaFree(xRightGpu);
+    cudaFree(xTopGpu);
+    cudaFree(xBottomGpu);
     cudaFree(rhsGpu);
     cudaFree(matrixElementsGpu);
 
@@ -722,11 +708,11 @@ int main(int argc, char *argv[])
     int sharedMem = 2 * subdomainLength * subdomainLength * sizeof(float);
     
     // Run the CPU Implementation and measure the time required
-    clock_t cpuStartTime = clock();
+/*    clock_t cpuStartTime = clock();
     float * solutionCpu = iterativeCpu(initX, rhs, matrixElements, nxGrids, nyGrids, nIters, method);
     clock_t cpuEndTime = clock();
     float cpuTime = (cpuEndTime - cpuStartTime) / (float) CLOCKS_PER_SEC;
-
+*/
     // Run the Classic GPU Implementation and measure the time required
     cudaEvent_t startClassic, stopClassic;
     float timeClassic;
@@ -763,7 +749,7 @@ int main(int argc, char *argv[])
     printf("Amount of shared memory to be requested: %d B\n", sharedMem);
     
     // Print out results to the screen, notify if any GPU Classic or Swept values differ significantly
-    for (int iGrid = 0; iGrid < nDofs; ++iGrid) {
+/*    for (int iGrid = 0; iGrid < nDofs; ++iGrid) {
         printf("%d %f %f %f \n",iGrid, solutionCpu[iGrid],
                              solutionGpuClassic[iGrid],
                              solutionGpuSwept[iGrid]); 
@@ -772,10 +758,10 @@ int main(int argc, char *argv[])
 	//    printf("For grid point %d, Classic and Swept give %f and %f respectively\n", iGrid, solutionGpuClassic[iGrid], solutionGpuSwept[iGrid]);
 	// }
     }
-
+*/
 
     // Print out time for cpu, classic gpu, and swept gpu approaches
-    float cpuTimePerIteration = (cpuTime / nIters) * 1e3;
+    // float cpuTimePerIteration = (cpuTime / nIters) * 1e3;
     float classicTimePerIteration = timeClassic / nIters;
     float sweptTimePerIteration = timeSwept / nIters;
     //float timeMultiplier = classicTimePerIteration / sweptTimePerIteration;
@@ -783,11 +769,11 @@ int main(int argc, char *argv[])
     printf("Time needed for the Classic GPU (per iteration) is %f ms\n", classicTimePerIteration);
     printf("Time needed for the Swept GPU (per iteration): %f ms\n", sweptTimePerIteration); */
     printf("===============TIMING INFORMATION============================\n");
-    printf("Total Time needed for the CPU: %f ms\n", cpuTime * 1e3);
+    //printf("Total Time needed for the CPU: %f ms\n", cpuTime * 1e3);
     printf("Total Time needed for the Classic GPU is %f ms\n", timeClassic);
     printf("Total Time needed for the Swept GPU: %f ms\n", timeSwept);
     printf("===========================================\n");
-    printf("Time per iteration needed for the CPU: %f ms\n", cpuTimePerIteration);
+    //printf("Time per iteration needed for the CPU: %f ms\n", cpuTimePerIteration);
     printf("Time per iteration needed for the Classic GPU is %f ms\n", classicTimePerIteration);
     printf("Time per iteration needed for the Swept GPU: %f ms\n", sweptTimePerIteration);
     printf("Swept takes %f the time Classic takes\n", timeSwept / timeClassic);
@@ -797,7 +783,7 @@ int main(int argc, char *argv[])
     float residualClassicGPU = Residual(solutionGpuClassic, rhs, matrixElements, nxGrids, nyGrids);
     float residualSweptGPU = Residual(solutionGpuSwept, rhs, matrixElements, nxGrids, nyGrids);
     printf("===============RESIDUAL INFORMATION============================\n");
-    printf("Residual of the CPU solution is %f\n", residualCPU);
+    //printf("Residual of the CPU solution is %f\n", residualCPU);
     printf("Residual of the Classic GPU solution is %f\n", residualClassicGPU);
     printf("Residual of the Swept GPU solution is %f\n", residualSweptGPU); 
     printf("The residual of Swept is %f times that of Classic\n", residualSweptGPU / residualClassicGPU); 
@@ -820,7 +806,7 @@ int main(int argc, char *argv[])
     delete[] initX;
     delete[] rhs;
     delete[] matrixElements;
-    delete[] solutionCpu;
+    //delete[] solutionCpu;
     delete[] solutionGpuClassic;
     delete[] solutionGpuSwept;
 }
