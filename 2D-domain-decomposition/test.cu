@@ -15,24 +15,26 @@
 #include <string.h>
 #include <utility>
 
+#include "iterative-methods.h"
+#include "iterative-2D-cpu.h"
+#include "iterative-2D-gpu.h"
 #include "iterative-2D-domain-decomposition-gpu.h"
 #include "helper.h"
 
 int main(int argc, char *argv[])
 {
     // INPUTS
-    int nxGrids = 64;
-    int nyGrids = 64;
-    int subdomainLength = 32; 
-    int threadsPerBlock = 32;
+    int nxGrids = 4;
+    int nyGrids = 4;
+    int subdomainLength = 2; 
+    int threadsPerBlock = 2;
 
-    int cycles = 100;
-    int num_JacobiIters = 100; 
+    int cycles = 1;
+    int num_JacobiIters = 2; 
+    int nIters = 2;
 
     printf("Cycles: %d, Jacobi Iterations: %d\n", cycles, num_JacobiIters);
 
-    int method = 0;
-   
     float dx = 1.0/ (nxGrids - 1);
     float dy = 1.0/ (nyGrids - 1);
     int nDofs = nxGrids * nyGrids;
@@ -40,6 +42,8 @@ int main(int argc, char *argv[])
     // INITIALIZATION
     float * initX = new float[nDofs];
     float * rhs = new float[nDofs];
+    float * solutionCPU = new float[nDofs];
+    float * solutionGPU = new float[nDofs];
     float * solutionDDGPU = new float[nDofs];
 
     // INITIAL SOLUTION
@@ -64,9 +68,9 @@ int main(int argc, char *argv[])
     matrixElements[3] = -1.0f / (dx * dx);
     matrixElements[4] = -1.0f / (dy * dy);
 
-    // solutionCPU = iterativeGpu(initX, rhs, matrixElements, nxGrids, nyGrids, nIters);  
-    // solutionGPU = iterativeGpu(initX, rhs, matrixElements, nxGrids, nyGrids, nIters);  
-    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, method, subdomainLength);  
+    solutionCPU = iterativeCpu(initX, rhs, matrixElements, nxGrids, nyGrids, nIters);  
+    solutionGPU = iterativeGpuClassic(initX, rhs, matrixElements, nxGrids, nyGrids, nIters, threadsPerBlock);  
+    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, subdomainLength);  
  
     // PRINT RESULTS
 /*    for (int iGrid = 0; iGrid < nDofs; iGrid++) 
@@ -74,17 +78,28 @@ int main(int argc, char *argv[])
         std::cout << "Grid Point " << iGrid <<  " Before " << initX[iGrid] << " After " << x0Cpu[iGrid] << std::endl;
     }
 */
-    // print2DSolution(solutionDDGPU, nxGrids, nyGrids);    
+    printf("CPU Solution:\n");
+    print2DSolution(solutionCPU, nxGrids, nyGrids);    
+    printf("GPU Solution:\n");
+    print2DSolution(solutionGPU, nxGrids, nyGrids);    
+    printf("Domain Decomposition GPU Solution:\n");
+    print2DSolution(solutionDDGPU, nxGrids, nyGrids);    
 
     // COMPUTE RESIDUAL
-    float residual = Residual(solutionDDGPU, rhs, matrixElements, nxGrids, nyGrids);
+    float residualCPU = Residual(solutionCPU, rhs, matrixElements, nxGrids, nyGrids);
+    float residualGPU = Residual(solutionGPU, rhs, matrixElements, nxGrids, nyGrids);
+    float residualDDGPU = Residual(solutionDDGPU, rhs, matrixElements, nxGrids, nyGrids);
 
     // PRINT RESIDUAL
-    printf("The residual is %f\n", residual);
+    printf("The residual from CPU is %f\n", residualCPU);
+    printf("The residual from GPU is %f\n", residualGPU);
+    printf("The residual from Domain Decomposition GPU is  %f\n", residualDDGPU);
 
     // CLEAN UP
     delete[] initX;
     delete[] rhs;
+    delete[] solutionCPU;
+    delete[] solutionGPU;
     delete[] solutionDDGPU;
 
     return 0;

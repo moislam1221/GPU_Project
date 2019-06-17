@@ -14,14 +14,6 @@
 #include <utility>
 #include "helper-gpu.h"
 
-__device__
-float jacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, const float topMatrix, const float bottomMatrix,
-              const float leftX, const float centerX, const float rightX, const float topX, const float bottomX,
-              const float centerRhs) {
-    float result = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX + topMatrix * topX + bottomMatrix * bottomX)) / centerMatrix;
-    return result;
-}
-
 // Method 1 - Move from global memory to shared memory
 __device__
 void globalToShared(const float * x0Block, const int xLength, const int yLength, const int nxGrids) {
@@ -147,7 +139,7 @@ void sharedToGlobal(float * x0Block, const int subdomainLength, const int xLengt
 
 
 __global__
-void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElementsGpu, const int nxGrids, const int nyGrids, const int method, const int subdomainLength, const int step, const int num_JacobiIters)
+void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElementsGpu, const int nxGrids, const int nyGrids, const int subdomainLength, const int step, const int num_JacobiIters)
 {
     // Instantiate shared memory here
     extern __shared__ float sharedMemory[];
@@ -197,7 +189,7 @@ void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElem
 
 float * iterativeGpuSwept(const float * initX, const float * rhs,
         const float * matrixElements,
-	const int nxGrids, const int nyGrids, const int cycles, const int num_JacobiIters, const int threadsPerBlock, const int method, const int subdomainLength)
+	const int nxGrids, const int nyGrids, const int cycles, const int num_JacobiIters, const int threadsPerBlock, const int subdomainLength)
 {     
     // Determine number of threads and blocks 
     const int nxBlocks = (int)ceil(nxGrids / (float)subdomainLength);
@@ -223,11 +215,12 @@ float * iterativeGpuSwept(const float * initX, const float * rhs,
 
     // Define amount of shared memory needed
     const int maxLength = 2 * subdomainLength;
+    // const int maxLength = (subdomainLength + 2);
     const int sharedBytes = 2 * maxLength * maxLength * sizeof(float);
 
     // Call kernel to allocate to sharedmemory and update points
     for (int step = 0; step < 2*cycles; step++) {
-        _2D_Algorithm <<<grid, block, sharedBytes>>> (x0Gpu, rhsGpu, matrixElementsGpu, nxGrids, nyGrids, method, subdomainLength, step, num_JacobiIters);
+        _2D_Algorithm <<<grid, block, sharedBytes>>> (x0Gpu, rhsGpu, matrixElementsGpu, nxGrids, nyGrids, subdomainLength, step, num_JacobiIters);
     }
 
     float * solution = new float[nDofs];

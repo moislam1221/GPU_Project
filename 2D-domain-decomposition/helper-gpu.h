@@ -1,3 +1,5 @@
+// Print values from the GPU
+
 // Print solution from GPU
 __device__
 void printSolutionGPU(const float * solution, int nxGrids, int nyGrids) {
