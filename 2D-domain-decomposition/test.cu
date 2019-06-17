@@ -24,14 +24,14 @@
 int main(int argc, char *argv[])
 {
     // INPUTS
-    int nxGrids = 4;
-    int nyGrids = 4;
-    int subdomainLength = 2; 
-    int threadsPerBlock = 2;
+    int nxGrids = 128;
+    int nyGrids = 128;
+    int subdomainLength = 32; 
+    int threadsPerBlock = 32;
 
-    int cycles = 1;
-    int num_JacobiIters = 2; 
-    int nIters = 2;
+    int cycles = 500;
+    int num_JacobiIters = 100; 
+    int nIters = 100;
 
     printf("Cycles: %d, Jacobi Iterations: %d\n", cycles, num_JacobiIters);
 
@@ -68,23 +68,45 @@ int main(int argc, char *argv[])
     matrixElements[3] = -1.0f / (dx * dx);
     matrixElements[4] = -1.0f / (dy * dy);
 
+    clock_t startCpuTime = clock();
     solutionCPU = iterativeCpu(initX, rhs, matrixElements, nxGrids, nyGrids, nIters);  
-    solutionGPU = iterativeGpuClassic(initX, rhs, matrixElements, nxGrids, nyGrids, nIters, threadsPerBlock);  
-    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, subdomainLength);  
+    clock_t endCpuTime = clock();
+    double cpuTime = (endCpuTime - startCpuTime) / (double) CLOCKS_PER_SEC;
+    cpuTime = cpuTime * (1e3);
  
+    cudaEvent_t gpuStart, gpuStop;
+    float gpuTime;
+    cudaEventCreate( &gpuStart );
+    cudaEventCreate( &gpuStop );
+    cudaEventRecord(gpuStart, 0);
+    solutionGPU = iterativeGpuClassic(initX, rhs, matrixElements, nxGrids, nyGrids, nIters, threadsPerBlock); 
+    cudaEventRecord(gpuStop, 0);
+    cudaEventSynchronize(gpuStop);
+    cudaEventElapsedTime(&gpuTime, gpuStart, gpuStop); 
+    
+    cudaEvent_t dd_gpuStart, dd_gpuStop;
+    float dd_gpuTime;
+    cudaEventCreate( &dd_gpuStart );
+    cudaEventCreate( &dd_gpuStop );
+    cudaEventRecord(dd_gpuStart, 0);
+    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, subdomainLength);  
+    cudaEventRecord(dd_gpuStop, 0);
+    cudaEventSynchronize(dd_gpuStop);
+    cudaEventElapsedTime(&dd_gpuTime, dd_gpuStart, dd_gpuStop); 
+    
     // PRINT RESULTS
 /*    for (int iGrid = 0; iGrid < nDofs; iGrid++) 
     {
         std::cout << "Grid Point " << iGrid <<  " Before " << initX[iGrid] << " After " << x0Cpu[iGrid] << std::endl;
     }
 */
-    printf("CPU Solution:\n");
+/*    printf("CPU Solution:\n");
     print2DSolution(solutionCPU, nxGrids, nyGrids);    
     printf("GPU Solution:\n");
     print2DSolution(solutionGPU, nxGrids, nyGrids);    
     printf("Domain Decomposition GPU Solution:\n");
     print2DSolution(solutionDDGPU, nxGrids, nyGrids);    
-
+*/
     // COMPUTE RESIDUAL
     float residualCPU = Residual(solutionCPU, rhs, matrixElements, nxGrids, nyGrids);
     float residualGPU = Residual(solutionGPU, rhs, matrixElements, nxGrids, nyGrids);
@@ -94,6 +116,11 @@ int main(int argc, char *argv[])
     printf("The residual from CPU is %f\n", residualCPU);
     printf("The residual from GPU is %f\n", residualGPU);
     printf("The residual from Domain Decomposition GPU is  %f\n", residualDDGPU);
+    
+    // PRINT TIMINGS
+    printf("The time required for the CPU to perform %d iterations is %f ms\n", nIters, cpuTime);
+    printf("The time required for the GPU to perform %d iterations is %f ms\n", nIters, gpuTime);
+    printf("The time required for the Domain Decomposition method on GPU (%d cycles, %d Jacobi iterations) is %f ms\n", cycles, num_JacobiIters, dd_gpuTime);
 
     // CLEAN UP
     delete[] initX;
