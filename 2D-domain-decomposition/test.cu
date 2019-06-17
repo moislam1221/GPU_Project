@@ -24,14 +24,15 @@
 int main(int argc, char *argv[])
 {
     // INPUTS
-    int nxGrids = 128;
-    int nyGrids = 128;
-    int subdomainLength = 32; 
+    int nxGrids = 256;
+    int nyGrids = 256;
+    int subdomainLength = 64; 
     int threadsPerBlock = 32;
+    int overlap = 1; //subdomainLength / 2;
 
-    int cycles = 500;
+    int cycles = 1000;
     int num_JacobiIters = 100; 
-    int nIters = 100;
+    int nIters = 0;
 
     printf("Cycles: %d, Jacobi Iterations: %d\n", cycles, num_JacobiIters);
 
@@ -89,7 +90,7 @@ int main(int argc, char *argv[])
     cudaEventCreate( &dd_gpuStart );
     cudaEventCreate( &dd_gpuStop );
     cudaEventRecord(dd_gpuStart, 0);
-    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, subdomainLength);  
+    solutionDDGPU = iterativeGpuSwept(initX, rhs, matrixElements, nxGrids, nyGrids, cycles, num_JacobiIters, threadsPerBlock, subdomainLength, overlap);  
     cudaEventRecord(dd_gpuStop, 0);
     cudaEventSynchronize(dd_gpuStop);
     cudaEventElapsedTime(&dd_gpuTime, dd_gpuStart, dd_gpuStop); 
@@ -107,6 +108,7 @@ int main(int argc, char *argv[])
     printf("Domain Decomposition GPU Solution:\n");
     print2DSolution(solutionDDGPU, nxGrids, nyGrids);    
 */
+
     // COMPUTE RESIDUAL
     float residualCPU = Residual(solutionCPU, rhs, matrixElements, nxGrids, nyGrids);
     float residualGPU = Residual(solutionGPU, rhs, matrixElements, nxGrids, nyGrids);

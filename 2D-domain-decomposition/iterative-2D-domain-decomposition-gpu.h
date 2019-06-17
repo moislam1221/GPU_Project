@@ -78,7 +78,7 @@ void redBlackBlockUpdate(const float * rhsBlock, const float * matrixElementsGpu
                     x1[index] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                                        leftX, centerX, rightX, topX, bottomX, centerRhs); 
                 }
-           
+
             }
             
         }
@@ -94,19 +94,16 @@ void redBlackBlockUpdate(const float * rhsBlock, const float * matrixElementsGpu
 
 // Method 3 - Move from shared memory to global memory
 __device__
-void sharedToGlobal(float * x0Block, const int subdomainLength, const int xLength, const int nxGrids) {
+void sharedToGlobal(float * x0Block, const int subdomainLength, const int overlap, const int xLength,  const int nxGrids) {
     
     // Initialize shared memory and pointers to x0, x1 arrays 
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory; 
     
-    // Define the amount of overlap
-    int overlap = subdomainLength / 2;
-    
     // Define point ID and stride for "for loop"
     int ID = threadIdx.x + threadIdx.y * blockDim.x;
     int stride = blockDim.x * blockDim.y;
-    
+   
     // Obtain the x,y shifts necessary to go from larger overlapping subdomain to restricted subdomain
     int xShiftToRestrict = 0;
     int yShiftToRestrict = 0;
@@ -137,9 +134,8 @@ void sharedToGlobal(float * x0Block, const int subdomainLength, const int xLengt
 
 }
 
-
 __global__
-void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElementsGpu, const int nxGrids, const int nyGrids, const int subdomainLength, const int step, const int num_JacobiIters)
+void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElementsGpu, const int nxGrids, const int nyGrids, const int subdomainLength, const int overlap, const int step, const int num_JacobiIters)
 {
     // Instantiate shared memory here
     extern __shared__ float sharedMemory[];
@@ -150,23 +146,20 @@ void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElem
     int yLower = blockIdx.y * subdomainLength;
     int yUpper = (blockIdx.y + 1) * subdomainLength - 1;
 
-    // Define amount of overlap (half of the subdomain length)
-    const int overlapLength = subdomainLength / 2;
-
     // Adjust the boundaries of the subdomain so that there is overlap
     if (blockIdx.x != 0) {
-        xLeft = xLeft - overlapLength;
+        xLeft = xLeft - overlap;
     }
     if (blockIdx.x != gridDim.x - 1) {
-        xRight = xRight + overlapLength;
+        xRight = xRight + overlap;
     }
     if (blockIdx.y != 0) {
-        yLower = yLower - overlapLength;
+        yLower = yLower - overlap;
     }
     if (blockIdx.y != gridDim.y - 1) {
-        yUpper = yUpper + overlapLength;
+        yUpper = yUpper + overlap;
     }
-
+    
     // Obtain the length in x and y of the subdomains
     const int xLength = xRight - xLeft + 1;
     const int yLength = yUpper - yLower + 1;
@@ -183,13 +176,13 @@ void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElem
     redBlackBlockUpdate(rhsBlock, matrixElementsGpu, xLength, yLength, num_JacobiIters, step);
     
     // Move updated values from shared memory to to appropriate restricted subdomain of global memory
-    sharedToGlobal(x0Block, subdomainLength, xLength, nxGrids);
+    sharedToGlobal(x0Block, subdomainLength, overlap, xLength, nxGrids);
 
 }
 
 float * iterativeGpuSwept(const float * initX, const float * rhs,
         const float * matrixElements,
-	const int nxGrids, const int nyGrids, const int cycles, const int num_JacobiIters, const int threadsPerBlock, const int subdomainLength)
+	const int nxGrids, const int nyGrids, const int cycles, const int num_JacobiIters, const int threadsPerBlock, const int subdomainLength, const int overlap)
 {     
     // Determine number of threads and blocks 
     const int nxBlocks = (int)ceil(nxGrids / (float)subdomainLength);
@@ -214,13 +207,13 @@ float * iterativeGpuSwept(const float * initX, const float * rhs,
     cudaMemcpy(rhsGpu, rhs, sizeof(float) * nDofs, cudaMemcpyHostToDevice);
 
     // Define amount of shared memory needed
-    const int maxLength = 2 * subdomainLength;
-    // const int maxLength = (subdomainLength + 2);
+    // const int maxLength = 2 * subdomainLength;
+    const int maxLength = subdomainLength + 2 * overlap;
     const int sharedBytes = 2 * maxLength * maxLength * sizeof(float);
 
     // Call kernel to allocate to sharedmemory and update points
     for (int step = 0; step < 2*cycles; step++) {
-        _2D_Algorithm <<<grid, block, sharedBytes>>> (x0Gpu, rhsGpu, matrixElementsGpu, nxGrids, nyGrids, subdomainLength, step, num_JacobiIters);
+        _2D_Algorithm <<<grid, block, sharedBytes>>> (x0Gpu, rhsGpu, matrixElementsGpu, nxGrids, nyGrids, subdomainLength, overlap, step, num_JacobiIters);
     }
 
     float * solution = new float[nDofs];
