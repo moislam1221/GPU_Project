@@ -74,11 +74,9 @@ void redBlackBlockUpdate(const float * rhsBlock, const float * matrixElementsGpu
 	        bottomX = x0[index-xLength];
 
                 // Perform jacobi updates on all inner points within appropriate block
-                if ((blockIdx.x + blockIdx.y) % 2 == ((step+1) % 2)) {
                     x1[index] = jacobi(leftMatrix, centerMatrix, rightMatrix, topMatrix, bottomMatrix,
                                        leftX, centerX, rightX, topX, bottomX, centerRhs); 
-                }
-
+            
             }
             
         }
@@ -137,46 +135,51 @@ void sharedToGlobal(float * x0Block, const int subdomainLength, const int overla
 __global__
 void _2D_Algorithm(float * x0Gpu, const float * rhsGpu, const float * matrixElementsGpu, const int nxGrids, const int nyGrids, const int subdomainLength, const int overlap, const int step, const int num_JacobiIters)
 {
-    // Instantiate shared memory here
-    extern __shared__ float sharedMemory[];
 
-    // Define the boundaries of the subdomain
-    int xLeft = blockIdx.x * subdomainLength;
-    int xRight = (blockIdx.x + 1) * subdomainLength - 1;
-    int yLower = blockIdx.y * subdomainLength;
-    int yUpper = (blockIdx.y + 1) * subdomainLength - 1;
+    if ((blockIdx.x + blockIdx.y) % 2 == ((step + 1) % 2)) {
+     
+        // Instantiate shared memory here
+        extern __shared__ float sharedMemory[];
 
-    // Adjust the boundaries of the subdomain so that there is overlap
-    if (blockIdx.x != 0) {
-        xLeft = xLeft - overlap;
-    }
-    if (blockIdx.x != gridDim.x - 1) {
-        xRight = xRight + overlap;
-    }
-    if (blockIdx.y != 0) {
-        yLower = yLower - overlap;
-    }
-    if (blockIdx.y != gridDim.y - 1) {
-        yUpper = yUpper + overlap;
-    }
+        // Define the boundaries of the subdomain
+        int xLeft = blockIdx.x * subdomainLength;
+        int xRight = (blockIdx.x + 1) * subdomainLength - 1;
+        int yLower = blockIdx.y * subdomainLength;
+        int yUpper = (blockIdx.y + 1) * subdomainLength - 1;
+
+        // Adjust the boundaries of the subdomain so that there is overlap
+        if (blockIdx.x != 0) {
+            xLeft = xLeft - overlap;
+        } 
+        if (blockIdx.x != gridDim.x - 1) {
+            xRight = xRight + overlap;
+        }
+        if (blockIdx.y != 0) {
+            yLower = yLower - overlap;
+        }
+        if (blockIdx.y != gridDim.y - 1) {
+            yUpper = yUpper + overlap;
+        }
     
-    // Obtain the length in x and y of the subdomains
-    const int xLength = xRight - xLeft + 1;
-    const int yLength = yUpper - yLower + 1;
+        // Obtain the length in x and y of the subdomains
+        const int xLength = xRight - xLeft + 1;
+        const int yLength = yUpper - yLower + 1;
 
-    // Point to the correct section of rhs
-    const int blockShift = xLeft + yLower * nxGrids;
-    float * x0Block = x0Gpu + blockShift;
-    const float * rhsBlock = rhsGpu + blockShift;
+        // Point to the correct section of rhs
+        const int blockShift = xLeft + yLower * nxGrids;
+        float * x0Block = x0Gpu + blockShift;
+        const float * rhsBlock = rhsGpu + blockShift;
 
-    // Move grid point values to the shared memory of each block    
-    globalToShared(x0Block, xLength, yLength, nxGrids);
+        // Move grid point values to the shared memory of each block    
+        globalToShared(x0Block, xLength, yLength, nxGrids);
     
-    // Update the inner grid points of block shared memory (alternate between red blocks and black blocks, depending on step k)
-    redBlackBlockUpdate(rhsBlock, matrixElementsGpu, xLength, yLength, num_JacobiIters, step);
+        // Update the inner grid points of block shared memory (alternate between red blocks and black blocks, depending on step k)
+        redBlackBlockUpdate(rhsBlock, matrixElementsGpu, xLength, yLength, num_JacobiIters, step);
     
-    // Move updated values from shared memory to to appropriate restricted subdomain of global memory
-    sharedToGlobal(x0Block, subdomainLength, overlap, xLength, nxGrids);
+        // Move updated values from shared memory to to appropriate restricted subdomain of global memory
+        sharedToGlobal(x0Block, subdomainLength, overlap, xLength, nxGrids);
+
+    }
 
 }
 
