@@ -61,10 +61,16 @@ void redBlackBlockUpdate(const float * rhsBlock, const float * matrixElementsGpu
     // For specified number of jacobi iterations to be performed each cycle
     for (int iter = 0; iter < max_JacobiIters; iter++) {
         // For all gridpoints in the subdomain 
-        for (int index = ID; index < xLength * yLength; index += stride) {
+        // for (int index = ID; index < xLength * yLength; index += stride) {
         // If the grid point lies in the interior
-            if ((index % xLength != 0) && ((index+1) % xLength != 0) && (index > xLength-1) && (index < xLength * (yLength-1))) {
-                                   
+        //    if ((index % xLength != 0) && ((index+1) % xLength != 0) && (index > xLength-1) && (index < xLength * (yLength-1))) {
+          
+        for (int iy = threadIdx.y + 1; iy < yLength - 1; iy += blockDim.y) {                         
+            for (int ix = threadIdx.x + 1; ix < xLength - 1; ix += blockDim.x) {
+                
+                // degree of freedom
+                int index = ix + iy * xLength; 
+
                 // Obtain adjacent grid point values and rhs value necessary for update
 	        centerRhs = rhsBlock[index];
 	        leftX = x0[index-1];
