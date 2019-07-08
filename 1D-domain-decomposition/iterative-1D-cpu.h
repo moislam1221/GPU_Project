@@ -22,12 +22,12 @@ float * iterativeCpu(const float * initX, const float * rhs,
     float * x0 = new float[nGrids];
     float * x1 = new float[nGrids];
     memcpy(x0, initX, sizeof(float) * nGrids);
-    memcpy(x1, initX, sizeof(float)*nGrids);
+    memcpy(x1, initX, sizeof(float) * nGrids);
     for (int iIter = 0; iIter < nIters; ++ iIter) {
-        for (int iGrid = 0; iGrid < nGrids; ++iGrid) {
-            float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
+        for (int iGrid = 1; iGrid < nGrids-1; ++iGrid) {
+            float leftX = x0[iGrid - 1];
             float centerX = x0[iGrid];
-            float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
+            float rightX = x0[iGrid + 1];
 	    if (iIter % 2 == 0) {
                 x1[iGrid] = iterativeOperation(leftMatrix[iGrid], centerMatrix[iGrid],
                                     rightMatrix[iGrid], leftX, centerX, rightX,

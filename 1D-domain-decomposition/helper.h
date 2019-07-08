@@ -7,14 +7,23 @@ float Residual(const float * solution, const float * rhs, const float * leftMatr
 {
     int nDofs = nGrids;
     float residual = 0.0;
+
+    float leftX, centerX, rightX, residualContributionFromRow;
+
     for (int iGrid = 0; iGrid < nDofs; iGrid++) {
-        float leftX = (iGrid > 0) ? solution[iGrid - 1] : 0.0f;
-        float centerX = solution[iGrid];
-        float rightX = (iGrid < nGrids - 1) ? solution[iGrid + 1] : 0.0f;
-        float residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid]);
+        if (iGrid == 0 || iGrid == nGrids-1) {
+            residualContributionFromRow = 0;
+        }
+        else {
+            leftX = solution[iGrid - 1];
+            centerX = solution[iGrid];
+            rightX = solution[iGrid + 1];
+            residualContributionFromRow = normFromRow(leftMatrix[iGrid], centerMatrix[iGrid], rightMatrix[iGrid], leftX, centerX, rightX, rhs[iGrid]);
+        }
+
         residual = residual + residualContributionFromRow * residualContributionFromRow;
-        // printf("For gridpoint %d, residual contribution is %f\n", iGrid, residualContributionFromRow);
     }
+
     residual = sqrt(residual);
     return residual;
 }

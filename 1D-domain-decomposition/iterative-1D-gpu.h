@@ -22,10 +22,10 @@ void _iterativeGpuClassicIteration(float * x1,
                          const float * rightMatrix, int nGrids, int iteration, int method)
 {
     int iGrid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (iGrid < nGrids) {
-        float leftX = (iGrid > 0) ? x0[iGrid - 1] : 0.0f;
+    if (iGrid > 0 && iGrid < nGrids - 1) {
+        float leftX = x0[iGrid - 1];
         float centerX = x0[iGrid];
-        float rightX = (iGrid < nGrids - 1) ? x0[iGrid + 1] : 0.0f;
+        float rightX = x0[iGrid + 1];
 	if (iteration % 2 == 0) {
             x1[iGrid] = iterativeOperation(leftMatrix[iGrid], centerMatrix[iGrid],
                                     rightMatrix[iGrid], leftX, centerX, rightX,
@@ -57,6 +57,7 @@ float * iterativeGpuClassic(const float * initX, const float * rhs,
     
     // Allocate GPU memory
     cudaMemcpy(x0Gpu, initX, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(x1Gpu, initX, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
     cudaMemcpy(rhsGpu, rhs, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
     cudaMemcpy(leftMatrixGpu, leftMatrix, sizeof(float) * nGrids,
             cudaMemcpyHostToDevice);
@@ -73,7 +74,7 @@ float * iterativeGpuClassic(const float * initX, const float * rhs,
         _iterativeGpuClassicIteration<<<nBlocks, threadsPerBlock>>>(
                 x1Gpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
                 rightMatrixGpu, nGrids, iIter, method); 
-        float * tmp = x1Gpu; x0Gpu = x1Gpu; x1Gpu = tmp;
+        float * tmp = x0Gpu; x0Gpu = x1Gpu; x1Gpu = tmp;
     }
 
     // Write solution from GPU to CPU variable
