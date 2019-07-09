@@ -169,10 +169,11 @@ int iterativeGpuRectangularMultipleIterationCount(const float * initX, const flo
     int nIters = 0;
     float * solution = new float[nGrids];
     while (residual > TOL) {
-        _update <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
-         nIters++;
-         cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids, cudaMemcpyDeviceToHost);
-         residual = Residual(solution, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+        _updateM <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
+        nIters++;
+        cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids, cudaMemcpyDeviceToHost);
+        residual = Residual(solution, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+        printf("residual = %f\n", residual);
     }
 
     // Clean up
