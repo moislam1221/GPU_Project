@@ -26,13 +26,23 @@
 int main(int argc, char *argv[])
 {
     // INPUTS
-    const int nGrids = 21; //atoi(argv[1]); 
-    const int threadsPerBlock = 8; //atoi(argv[2]); 
-    const int cycles = 1;
-    const int nIterations = 2; //atoi(argv[3]);
-    const int nCpuIterations = 1000; //atoi(argv[3]);
-    const int nGpuIterations = 1000; //atoi(argv[3]);
+/*    const int nGrids = atoi(argv[1]); 
+    const int threadsPerBlock = atoi(argv[2]); 
+    const int cycles = atoi(argv[3]);
+    const int nIterations = atoi(argv[4]);
+    const int nCpuIterations = 2; //atoi(argv[3]);
+    const int nGpuIterations = atoi(argv[5]);
     method_type method = JACOBI;
+*/
+    // INPUTS
+    const int nGrids = atoi(argv[1]); 
+    const int threadsPerBlock = atoi(argv[2]); 
+    const int nInnerUpdates = atoi(argv[3]);
+    const int TOL = atoi(argv[4]);
+    method_type method = JACOBI;
+    int nCpuIterations;
+    int nGpuIterations;
+    int nCycles;
 
     // INITIALIZE ARRAYS
     float * initX = new float[nGrids];
@@ -55,6 +65,14 @@ int main(int argc, char *argv[])
         centerMatrix[iGrid] = 2.0f / (dx * dx);
         rightMatrix[iGrid] = -1.0f / (dx * dx);
     }
+
+    // OBTAIN NUMBER OF ITERATIONS NECESSARY TO ACHIEVE TOLERANCE
+    nCpuIterations = iterativeCpuIterationCount(initX, rhs, leftMatrix, centerMatrix,
+                                    rightMatrix, nGrids, TOL, method);
+    nGpuIterations = iterativeGpuClassicIterationCount(initX, rhs, leftMatrix,
+            centerMatrix, rightMatrix, nGrids, TOL, threadsPerBlock, method);
+    nCycles = iterativeGpuRectangularIterationCount(initX, rhs, leftMatrix,
+            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, TOL, nInnerUpdates, method);
 
     // CPU
     clock_t cpuStartTime = clock();
@@ -83,11 +101,11 @@ int main(int argc, char *argv[])
     cudaEventCreate( &stopGpuRectangular );
     cudaEventRecord( startGpuRectangular, 0);
     float * solutionGpuRectangular = iterativeGpuRectangular(initX, rhs, leftMatrix,
-            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, cycles, nIterations, method);
+            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, nCycles, nInnerUpdates, method);
     cudaEventRecord(stopGpuRectangular, 0);
     cudaEventSynchronize(stopGpuRectangular);
     cudaEventElapsedTime(&gpuRectangularTime, startGpuRectangular, stopGpuRectangular);
-    
+/*    
     // RECTANGULAR MULTIPLE METHOD
     cudaEvent_t startGpuRectangularMultiple, stopGpuRectangularMultiple;
     float gpuRectangularMultipleTime;
@@ -95,14 +113,14 @@ int main(int argc, char *argv[])
     cudaEventCreate( &stopGpuRectangularMultiple );
     cudaEventRecord( startGpuRectangularMultiple, 0);
     float * solutionGpuRectangularMultiple = iterativeGpuRectangularMultiple(initX, rhs, leftMatrix,
-            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, cycles, nIterations, method, 2);
+            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, cycles, nIterations, method, 10);
     cudaEventRecord(stopGpuRectangularMultiple, 0);
     cudaEventSynchronize(stopGpuRectangularMultiple);
     cudaEventElapsedTime(&gpuRectangularMultipleTime, startGpuRectangularMultiple, stopGpuRectangularMultiple);
-
+*/
     // PRINT SOLUTION
     for (int i = 0; i < nGrids; i++) {
-        printf("Grid %d = %f %f %f %f\n", i, solutionCpu[i], solutionGpu[i], solutionGpuRectangular[i], solutionGpuRectangularMultiple[i]);
+        printf("Grid %d = %f %f %f\n", i, solutionCpu[i], solutionGpu[i], solutionGpuRectangular[i]);
     }
     
     // PRINTOUT
@@ -111,14 +129,46 @@ int main(int argc, char *argv[])
     printf("Number of grid points: %d\n", nGrids);
     printf("Threads Per Block: %d\n", threadsPerBlock);
     printf("Method used: %d\n", method);
-    printf("Number of Iterations performed: %d\n", nIterations);
+    printf("Number of Cycles of Rectangular performed: %d\n", nCycles);
+    printf("======================================================\n");
+    printf("\n");
+    
+    // Print out number of iterations needed for each method
+    printf("Number of Iterations needed for CPU: %d \n", nCpuIterations);
+    printf("Number of Iterations needed for GPU: %d \n", nGpuIterations);
+    printf("Number of Cycles needed for GPU Rectangular: %d (with %d inner updates) \n", nCycles, nInnerUpdates);
+    //printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
+    printf("======================================================\n");
     printf("\n");
     
     // Print out time for cpu, classic gpu, and swept gpu approaches
     printf("Time needed for the CPU: %f ms\n", cpuTime);
     printf("Time needed for the GPU: %f ms\n", gpuTime);
     printf("Time needed for the GPU Rectangular method: %f ms\n", gpuRectangularTime);
-    printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
+    //printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
+    printf("======================================================\n");
+    printf("\n");
+
+
+    // Compute the residual of the resulting solution (|b-Ax|)
+    float residualCpu = Residual(solutionCpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    float residualGpu = Residual(solutionGpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    float residualGpuRectangular = Residual(solutionGpuRectangular, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    // float residualGpuRectangularMultiple = Residual(solutionGpuRectangularMultiple, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    printf("Residual of the CPU solution is %f\n", residualCpu);
+    printf("Residual of the GPU solution is %f\n", residualGpu);
+    printf("Residual of the Rectangular solution is %f\n", residualGpuRectangular);
+    // printf("Residual of the Rectangular Multiple solution is %f\n", residualGpuRectangularMultiple);
+
+/*    for (int i = 0; i < nGrids; i++) {
+        if (i == 0 || i == nGrids-1) {
+            assert(solutionGpuRectangular[i] == 0.0);
+        }
+        else {
+            assert(solutionGpuRectangular[i] == (float)(cycles * nIterations + 1.0));
+        }
+    }   
+*/
 
 /*    // Print out time for cpu, classic gpu, and swept gpu approaches
     float cpuTimePerIteration = (cpuTime / nIters) * 1e3;
@@ -130,23 +180,15 @@ int main(int argc, char *argv[])
     printf("Time needed for the Swept GPU (per iteration): %f ms\n", sweptTimePerIteration);
 */
 
-    // Compute the residual of the resulting solution (|b-Ax|)
-    float residualCpu = Residual(solutionCpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    float residualGpu = Residual(solutionGpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    float residualGpuRectangular = Residual(solutionGpuRectangular, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    float residualGpuRectangularMultiple = Residual(solutionGpuRectangularMultiple, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    printf("Residual of the CPU solution is %f\n", residualCpu);
-    printf("Residual of the GPU solution is %f\n", residualGpu);
-    printf("Residual of the Rectangular solution is %f\n", residualGpuRectangular);
-    printf("Residual of the Rectangular Multiple solution is %f\n", residualGpuRectangularMultiple);
-    
     // FREE MEMORY
     delete[] initX;
     delete[] rhs;
     delete[] leftMatrix;
     delete[] centerMatrix;
     delete[] rightMatrix;
+    delete[] solutionGpu;
     delete[] solutionGpuRectangular;
+    //delete[] solutionGpuRectangularMultiple;
 
     return 0;
 }

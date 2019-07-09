@@ -92,3 +92,60 @@ float * iterativeGpuClassic(const float * initX, const float * rhs,
 
     return solution;
 }
+
+int iterativeGpuClassicIterationCount(const float * initX, const float * rhs,
+                         const float * leftMatrix, const float * centerMatrix,
+                         const float * rightMatrix, int nGrids, float TOL,
+                         const int threadsPerBlock, int method)
+{
+    // Allocate memory in the CPU for all inputs and solutions
+    float * x0Gpu, * x1Gpu;
+    cudaMalloc(&x0Gpu, sizeof(float) * nGrids);
+    cudaMalloc(&x1Gpu, sizeof(float) * nGrids);
+    float * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu;
+    cudaMalloc(&rhsGpu, sizeof(float) * nGrids);
+    cudaMalloc(&leftMatrixGpu, sizeof(float) * nGrids);
+    cudaMalloc(&centerMatrixGpu, sizeof(float) * nGrids);
+    cudaMalloc(&rightMatrixGpu, sizeof(float) * nGrids);
+    
+    // Allocate GPU memory
+    cudaMemcpy(x0Gpu, initX, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(x1Gpu, initX, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(rhsGpu, rhs, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(leftMatrixGpu, leftMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+    cudaMemcpy(centerMatrixGpu, centerMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+    cudaMemcpy(rightMatrixGpu, rightMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+
+    // Run the classic iteration for prescribed number of iterations
+    // int threadsPerBlock = 16;
+    int nBlocks = (int)ceil(nGrids / (float)threadsPerBlock);
+    float residual = 100.0;
+    int iIter = 0;
+    float * solution = new float[nGrids];
+    while (residual > TOL) {
+	// Jacobi iteration on the CPU
+        _iterativeGpuClassicIteration<<<nBlocks, threadsPerBlock>>>(
+                x1Gpu, x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu,
+                rightMatrixGpu, nGrids, iIter, method); 
+        float * tmp = x0Gpu; x0Gpu = x1Gpu; x1Gpu = tmp;
+        iIter++;
+        // Write solution from GPU to CPU variable
+        cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids, cudaMemcpyDeviceToHost);
+        residual = Residual(solution, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    }
+
+    // Free all memory
+    delete[] solution;
+    cudaFree(x0Gpu);
+    cudaFree(x1Gpu);
+    cudaFree(rhsGpu);
+    cudaFree(leftMatrixGpu);
+    cudaFree(centerMatrixGpu);
+    cudaFree(rightMatrixGpu);
+
+    int nIters = iIter;
+    return nIters;
+}
