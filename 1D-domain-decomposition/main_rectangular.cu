@@ -38,11 +38,13 @@ int main(int argc, char *argv[])
     const int nGrids = atoi(argv[1]); 
     const int threadsPerBlock = atoi(argv[2]); 
     const int nInnerUpdates = atoi(argv[3]);
+    const int pMultiple = atoi(argv[4]);
     const int TOL = atoi(argv[4]);
     method_type method = JACOBI;
     int nCpuIterations;
     int nGpuIterations;
     int nCycles;
+    int nCyclesMultiple;
 
     // INITIALIZE ARRAYS
     float * initX = new float[nGrids];
@@ -73,6 +75,8 @@ int main(int argc, char *argv[])
             centerMatrix, rightMatrix, nGrids, TOL, threadsPerBlock, method);
     nCycles = iterativeGpuRectangularIterationCount(initX, rhs, leftMatrix,
             centerMatrix, rightMatrix, nGrids,  threadsPerBlock, TOL, nInnerUpdates, method);
+    nCyclesMultiple = iterativeGpuRectangularMultipleIterationCount(initX, rhs, leftMatrix,
+            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, TOL, nInnerUpdates, method, pMultiple);
 
     // CPU
     clock_t cpuStartTime = clock();
@@ -105,7 +109,7 @@ int main(int argc, char *argv[])
     cudaEventRecord(stopGpuRectangular, 0);
     cudaEventSynchronize(stopGpuRectangular);
     cudaEventElapsedTime(&gpuRectangularTime, startGpuRectangular, stopGpuRectangular);
-/*    
+    
     // RECTANGULAR MULTIPLE METHOD
     cudaEvent_t startGpuRectangularMultiple, stopGpuRectangularMultiple;
     float gpuRectangularMultipleTime;
@@ -113,14 +117,14 @@ int main(int argc, char *argv[])
     cudaEventCreate( &stopGpuRectangularMultiple );
     cudaEventRecord( startGpuRectangularMultiple, 0);
     float * solutionGpuRectangularMultiple = iterativeGpuRectangularMultiple(initX, rhs, leftMatrix,
-            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, cycles, nIterations, method, 10);
+            centerMatrix, rightMatrix, nGrids,  threadsPerBlock, nCyclesMultiple, nInnerUpdates, method, pMultiple);
     cudaEventRecord(stopGpuRectangularMultiple, 0);
     cudaEventSynchronize(stopGpuRectangularMultiple);
     cudaEventElapsedTime(&gpuRectangularMultipleTime, startGpuRectangularMultiple, stopGpuRectangularMultiple);
-*/
+
     // PRINT SOLUTION
     for (int i = 0; i < nGrids; i++) {
-        printf("Grid %d = %f %f %f\n", i, solutionCpu[i], solutionGpu[i], solutionGpuRectangular[i]);
+        printf("Grid %d = %f %f %f %f\n", i, solutionCpu[i], solutionGpu[i], solutionGpuRectangular[i], solutionGpuRectangularMultiple[i]);
     }
     
     // PRINTOUT
@@ -137,7 +141,7 @@ int main(int argc, char *argv[])
     printf("Number of Iterations needed for CPU: %d \n", nCpuIterations);
     printf("Number of Iterations needed for GPU: %d \n", nGpuIterations);
     printf("Number of Cycles needed for GPU Rectangular: %d (with %d inner updates) \n", nCycles, nInnerUpdates);
-    //printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
+    printf("Number of Cycles needed for GPU Rectangular Multiple: %d (with %d inner updates and %d points per thread) \n", nCycles, nInnerUpdates, pMultiple);
     printf("======================================================\n");
     printf("\n");
     
@@ -145,7 +149,7 @@ int main(int argc, char *argv[])
     printf("Time needed for the CPU: %f ms\n", cpuTime);
     printf("Time needed for the GPU: %f ms\n", gpuTime);
     printf("Time needed for the GPU Rectangular method: %f ms\n", gpuRectangularTime);
-    //printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
+    printf("Time needed for the GPU Rectangular Multiple method: %f ms\n", gpuRectangularMultipleTime);
     printf("======================================================\n");
     printf("\n");
 
@@ -154,11 +158,11 @@ int main(int argc, char *argv[])
     float residualCpu = Residual(solutionCpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
     float residualGpu = Residual(solutionGpu, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
     float residualGpuRectangular = Residual(solutionGpuRectangular, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
-    // float residualGpuRectangularMultiple = Residual(solutionGpuRectangularMultiple, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    float residualGpuRectangularMultiple = Residual(solutionGpuRectangularMultiple, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
     printf("Residual of the CPU solution is %f\n", residualCpu);
     printf("Residual of the GPU solution is %f\n", residualGpu);
     printf("Residual of the Rectangular solution is %f\n", residualGpuRectangular);
-    // printf("Residual of the Rectangular Multiple solution is %f\n", residualGpuRectangularMultiple);
+    printf("Residual of the Rectangular Multiple solution is %f\n", residualGpuRectangularMultiple);
 
 /*    for (int i = 0; i < nGrids; i++) {
         if (i == 0 || i == nGrids-1) {
@@ -188,7 +192,7 @@ int main(int argc, char *argv[])
     delete[] rightMatrix;
     delete[] solutionGpu;
     delete[] solutionGpuRectangular;
-    //delete[] solutionGpuRectangularMultiple;
+    delete[] solutionGpuRectangularMultiple;
 
     return 0;
 }

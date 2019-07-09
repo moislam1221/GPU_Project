@@ -65,6 +65,9 @@ void _updateM(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, 
     const float * centerMatrixBlock = centerMatrixGpu + blockShift * blockIdx.x;
     const float * rightMatrixBlock = rightMatrixGpu + blockShift * blockIdx.x;
 
+    // Synchronize all threads before entering kernel
+    __syncthreads();    
+
     // Update all inner points
     __updateKernelM(rhsBlock, leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, nSub, numIterations, method);
 
@@ -84,7 +87,7 @@ void _updateM(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, 
 */
 }
 
-float * iterativeGpuRectangularMultiple(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int cycles, const int nIterations, int method, const int pointsPerThread)
+float * iterativeGpuRectangularMultiple(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int cycles, const int nInnerUpdates, int method, const int pointsPerThread)
 {
     // Number of grid points handled by a subdomain
     const int nSub = pointsPerThread*(threadsPerBlock) + 2;
@@ -115,7 +118,7 @@ float * iterativeGpuRectangularMultiple(const float * initX, const float * rhs, 
 
     // Call kernel to allocate to sharedmemory and update points
     for (int step = 0; step < cycles; step++) {
-        _updateM <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nIterations, method);
+        _updateM <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
     }
 
     float * solution = new float[nGrids];
@@ -132,3 +135,53 @@ float * iterativeGpuRectangularMultiple(const float * initX, const float * rhs, 
     return solution;
 }
 
+int iterativeGpuRectangularMultipleIterationCount(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int TOL, const int nInnerUpdates, int method, const int pointsPerThread)
+{
+    // Number of grid points handled by a subdomain
+    const int nSub = pointsPerThread*(threadsPerBlock) + 2;
+
+    // Number of blocks necessary
+    const int numBlocks = ceil(((float)nGrids-2.0) / (float)(pointsPerThread*threadsPerBlock));
+
+    // Allocate GPU memory via cudaMalloc
+    float * x0Gpu, * rhsGpu, * leftMatrixGpu, * rightMatrixGpu, * centerMatrixGpu;
+    cudaMalloc(&x0Gpu, sizeof(float) * nGrids);
+    cudaMalloc(&rhsGpu, sizeof(float) * nGrids);
+    cudaMalloc(&leftMatrixGpu, sizeof(float) * nGrids);
+    cudaMalloc(&rightMatrixGpu, sizeof(float) * nGrids);
+    cudaMalloc(&centerMatrixGpu, sizeof(float) * nGrids);
+    
+    // Copy contents to GPU
+    cudaMemcpy(x0Gpu, initX, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(rhsGpu, rhs, sizeof(float) * nGrids, cudaMemcpyHostToDevice);
+    cudaMemcpy(leftMatrixGpu, leftMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+    cudaMemcpy(centerMatrixGpu, centerMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+    cudaMemcpy(rightMatrixGpu, rightMatrix, sizeof(float) * nGrids,
+            cudaMemcpyHostToDevice);
+
+    // Define amount of shared memory needed
+    const int sharedBytes = 2 * nSub * sizeof(float);
+
+    // Call kernel to allocate to sharedmemory and update points
+    float residual = 100.0;
+    int nIters = 0;
+    float * solution = new float[nGrids];
+    while (residual > TOL) {
+        _update <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
+         nIters++;
+         cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids, cudaMemcpyDeviceToHost);
+         residual = Residual(solution, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+    }
+
+    // Clean up
+    delete[] solution;
+    cudaFree(x0Gpu);
+    cudaFree(rhsGpu);
+    cudaFree(leftMatrixGpu);
+    cudaFree(centerMatrixGpu);
+    cudaFree(rightMatrixGpu);
+
+    return nIters;
+}
