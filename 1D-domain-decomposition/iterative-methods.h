@@ -3,13 +3,13 @@ enum method_type { JACOBI, GS, SOR };
 __host__ __device__
 float jacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs)
 {
-    return gridValue = (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
+    return (centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix;
 }
 
 __host__ __device__
-float relaxedJacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, const float omega)
+float relaxedJacobi(const float leftMatrix, const float centerMatrix, const float rightMatrix, float leftX, float centerX, float rightX, const float centerRhs, const float relaxation)
 {
-    return gridValue = relaxation*((centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix) + (1.0-relaxation)*centerX;
+    return relaxation*((centerRhs - (leftMatrix * leftX + rightMatrix * rightX)) / centerMatrix) + (1.0-relaxation)*centerX;
 }
 
 

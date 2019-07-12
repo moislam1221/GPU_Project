@@ -1,16 +1,14 @@
 __device__
-void __updateKernel(const float * rhsBlock, const float * leftMatrixBlock, const float * centerMatrixBlock, const float * rightMatrixBlock, const int nGrids, const int nSub, const int numIterations, const int method)
+void __jacobiUpdateKernel(const float * rhsBlock, const float * leftMatrixBlock, const float * centerMatrixBlock, const float * rightMatrixBlock, const int nGrids, const int nSub, const int numIterations)
 {
     extern __shared__ float sharedMemory[];
     float * x0 = sharedMemory, * x1 = sharedMemory + nSub;
-
     
     for (int k = 0; k < numIterations; k++) {
         int i = threadIdx.x + 1;
         int I = blockIdx.x * blockDim.x + i;
         if (I < nGrids-1) {
-            x1[i] = iterativeOperation(leftMatrixBlock[i], centerMatrixBlock[i], rightMatrixBlock[i], x0[i-1], x0[i], x0[i+1], rhsBlock[i], 5, method);
-//            x1[i] = x0[i] + 1.0;
+            x1[i] = jacobi(leftMatrixBlock[i], centerMatrixBlock[i], rightMatrixBlock[i], x0[i-1], x0[i], x0[i+1], rhsBlock[i]);
         }
         __syncthreads();
         float * tmp = x1; x1 = x0; x0 = tmp;
@@ -19,7 +17,7 @@ void __updateKernel(const float * rhsBlock, const float * leftMatrixBlock, const
 }
 
 __global__
-void _update(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, const float * centerMatrixGpu, const float * rightMatrixGpu, const int nGrids, const int nSub, const int numIterations, const int method)
+void _jacobiUpdate(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, const float * centerMatrixGpu, const float * rightMatrixGpu, const int nGrids, const int nSub, const int numIterations)
 {
     // Move to shared memory
     extern __shared__ float sharedMemory[];
@@ -47,7 +45,7 @@ void _update(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, c
     __syncthreads();
 
     // Update all inner points
-    __updateKernel(rhsBlock, leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, nSub, numIterations, method);
+    __jacobiUpdateKernel(rhsBlock, leftMatrixBlock, centerMatrixBlock, rightMatrixBlock, nGrids, nSub, numIterations);
 
     // Move back to global memory
     if ((I+1) < nGrids) {
@@ -56,7 +54,7 @@ void _update(float * x0Gpu, const float * rhsGpu, const float * leftMatrixGpu, c
     __syncthreads();
 }
 
-float * iterativeGpuRectangular(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int cycles, const int nInnerUpdates, int method)
+float * jacobiGpuRectangular(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int cycles, const int nInnerUpdates)
 {
     // Number of grid points handled by a subdomain
     const int nSub = threadsPerBlock + 2;
@@ -87,7 +85,7 @@ float * iterativeGpuRectangular(const float * initX, const float * rhs, const fl
 
     // Call kernel to allocate to sharedmemory and update points
     for (int step = 0; step < cycles; step++) {
-        _update <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
+        _jacobiUpdate <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates);
     }
 
     float * solution = new float[nGrids];
@@ -104,7 +102,7 @@ float * iterativeGpuRectangular(const float * initX, const float * rhs, const fl
     return solution;
 }
 
-int iterativeGpuRectangularIterationCount(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int TOL, const int nInnerUpdates, int method)
+int jacobiGpuRectangularIterationCount(const float * initX, const float * rhs, const float * leftMatrix, const float * centerMatrix, const float * rightMatrix, const int nGrids, const int threadsPerBlock, const int TOL, const int nInnerUpdates)
 {
     // Number of grid points handled by a subdomain
     const int nSub = threadsPerBlock + 2;
@@ -138,10 +136,11 @@ int iterativeGpuRectangularIterationCount(const float * initX, const float * rhs
     int nIters = 0;
     float * solution = new float[nGrids];
     while (residual > TOL) {
-        _update <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates, method);
+        _jacobiUpdate <<<numBlocks, threadsPerBlock, sharedBytes>>> (x0Gpu, rhsGpu, leftMatrixGpu, centerMatrixGpu, rightMatrixGpu, nGrids, nSub, nInnerUpdates);
          nIters++;
          cudaMemcpy(solution, x0Gpu, sizeof(float) * nGrids, cudaMemcpyDeviceToHost);
          residual = Residual(solution, rhs, leftMatrix, centerMatrix, rightMatrix, nGrids);
+//         printf("The residual is %f\n", residual);
     }
 
     // Clean up
